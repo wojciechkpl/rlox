@@ -575,9 +575,10 @@ impl NonStationaryCartPole {
             DriftMode::Sinusoidal { amplitude, period } => {
                 base + amplitude * (2.0 * PI * t as f64 / period).sin()
             }
-            DriftMode::Step { step_size, interval } => {
-                base + step_size * (t / interval) as f64
-            }
+            DriftMode::Step {
+                step_size,
+                interval,
+            } => base + step_size * (t / interval) as f64,
         }
     }
 
@@ -646,7 +647,11 @@ impl RLEnv for NonStationaryCartPole {
 
         let [x, x_dot, theta, theta_dot] = self.state;
 
-        let force = if action_idx == 1 { force_mag } else { -force_mag };
+        let force = if action_idx == 1 {
+            force_mag
+        } else {
+            -force_mag
+        };
 
         let cos_theta = theta.cos();
         let sin_theta = theta.sin();
@@ -706,8 +711,12 @@ impl RLEnv for NonStationaryCartPole {
     fn render(&self) -> Option<String> {
         Some(format!(
             "NonStationaryCartPole | step={} global={} | x={:.4} theta={:.4} | g={:.2} l={:.3}",
-            self.steps, self.global_step, self.state[0], self.state[2],
-            self.current_gravity(), self.current_pole_length()
+            self.steps,
+            self.global_step,
+            self.state[0],
+            self.state[2],
+            self.current_gravity(),
+            self.current_pole_length()
         ))
     }
 }

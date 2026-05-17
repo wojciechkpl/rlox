@@ -23,7 +23,7 @@ class TestCoreAPI:
     """All Rust primitives and core Python classes are in __all__."""
 
     def test_all_count(self):
-        assert len(rlox.__all__) == 55
+        assert len(rlox.__all__) == 57
 
     def test_trainer_in_all(self):
         assert "Trainer" in rlox.__all__

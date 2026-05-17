@@ -5,8 +5,8 @@ use pyo3::types::PyDict;
 
 use rlox_core::pipeline::channel::{Pipeline, RolloutBatch};
 use rlox_core::training::augmentation;
-use rlox_core::training::gae;
 use rlox_core::training::cpd;
+use rlox_core::training::gae;
 use rlox_core::training::normalization::{ExponentialRunningStats, RunningStats, RunningStatsVec};
 use rlox_core::training::packing;
 use rlox_core::training::reward_shaping;

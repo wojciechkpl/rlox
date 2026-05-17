@@ -321,8 +321,8 @@ mod tests {
             assert!(!det.update(100.0)); // even extreme values
         }
         assert!(!det.is_ready()); // Wait, 19 < 20... let me check the logic
-        // Actually count starts at 1, so after 19 updates count=19 < burnin=20
-        // After one more:
+                                  // Actually count starts at 1, so after 19 updates count=19 < burnin=20
+                                  // After one more:
         assert!(!det.update(100.0)); // count=20, burnin completes, no alarm on this step
         assert!(det.is_ready());
     }
