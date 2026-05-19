@@ -35,8 +35,8 @@ class TestCoreAPI:
         for name in ["PPOConfig", "SACConfig", "DQNConfig", "TD3Config", "A2CConfig", "TRPOConfig"]:
             assert name in rlox.__all__, f"{name} missing from __all__"
 
-    def test_version_is_1_1_0(self):
-        assert rlox.__version__ == "1.1.0"
+    def test_version_is_1_2_0(self):
+        assert rlox.__version__ == "1.2.0"
 
     def test_deprecated_trainers_not_in_all(self):
         for name in ["PPOTrainer", "SACTrainer", "DQNTrainer"]:
