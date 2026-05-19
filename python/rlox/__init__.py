@@ -261,7 +261,7 @@ def __getattr__(name: str):
         return attr
     raise AttributeError(f"module 'rlox' has no attribute {name!r}")
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # ---------------------------------------------------------------------------
 # Public API (__all__)

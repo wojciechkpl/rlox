@@ -4237,7 +4237,7 @@ dependencies = [
 
 [[package]]
 name = "rlox-burn"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "burn",
  "rand 0.9.2",
@@ -4247,7 +4247,7 @@ dependencies = [
 
 [[package]]
 name = "rlox-candle"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -4259,7 +4259,7 @@ dependencies = [
 
 [[package]]
 name = "rlox-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crossbeam-channel",
  "memmap2",
@@ -4288,14 +4288,14 @@ dependencies = [
 
 [[package]]
 name = "rlox-nn"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "rlox-python"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "burn",
  "candle-core",

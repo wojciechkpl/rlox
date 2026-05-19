@@ -1,6 +1,6 @@
 [package]
 name = "rlox-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license.workspace = true
 description = "Rust-accelerated RL core: VecEnv, replay/prioritized/offline buffers, GAE, V-trace, KL, GRPO, async pipeline"

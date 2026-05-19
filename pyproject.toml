@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rlox"
-version = "1.1.0"
+version = "1.2.0"
 requires-python = ">=3.10"
 license = "MIT OR Apache-2.0"
 description = "Rust-accelerated reinforcement learning — 142x faster GAE, 53x faster rollouts. The Polars of RL."
