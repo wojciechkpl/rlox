@@ -109,6 +109,11 @@ pub mod worker;
 
 pub mod error;
 
+// Step 3 (Cycle 1): rollout server HTTP skeleton and telemetry struct.
+// Both modules are platform-independent (no Linux-specific syscalls).
+pub mod server;
+pub mod stats;
+
 // Re-exports for callers
 #[cfg(target_os = "linux")]
 pub use worker::{
@@ -117,3 +122,8 @@ pub use worker::{
 };
 
 pub use error::SandboxError;
+pub use server::{
+    router, router_with_config, RolloutRequest, RolloutResponse, RolloutTask, SamplingParams,
+    SandboxRunConfig, ServerConfig, Trajectory,
+};
+pub use stats::BackendStats;
