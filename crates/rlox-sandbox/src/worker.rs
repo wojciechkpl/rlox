@@ -565,6 +565,12 @@ pub async fn run_sandboxed(
         let _ = cgroup::destroy_leaf(&leaf_path);
         return Err(e);
     }
+    // Disable swap so memory-over-limit processes are OOM-killed promptly at
+    // memory.max rather than thrashing swap until the timeout fires (FIX 1).
+    if let Err(e) = cgroup::write_memory_swap_max_zero(&leaf_path) {
+        let _ = cgroup::destroy_leaf(&leaf_path);
+        return Err(e);
+    }
     if let Err(e) = cgroup::write_pids_max(&leaf_path, config.pids_limit) {
         let _ = cgroup::destroy_leaf(&leaf_path);
         return Err(e);
@@ -874,11 +880,23 @@ pub async fn run_sandboxed(
     if timed_out {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
+
+    // FIX 2: Read memory.events BEFORE destroying the leaf to get an
+    // authoritative OOM count.  The cgroup kernel counters persist until the
+    // leaf directory is removed.
+    let oom_kill_count = cgroup::read_oom_kill_count(&leaf_path).unwrap_or(0);
+
     let _ = cgroup::destroy_leaf(&leaf_path);
 
     let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
 
-    if timed_out {
+    // Authoritative OOM detection: if memory.events reports oom_kill > 0, the
+    // cgroup OOM killer fired.  This takes precedence over the timeout path —
+    // a process can be OOM-killed right at the timeout boundary, and we want
+    // to label it correctly.  Only fall back to Timeout when oom_kill == 0.
+    let oom_event = oom_kill_count > 0;
+
+    if timed_out && !oom_event {
         return Ok(SandboxOutput {
             job_id: input.job_id,
             pass_rate: 0.0,
@@ -895,18 +913,19 @@ pub async fn run_sandboxed(
         });
     }
 
+    // Classify exit status from waitpid raw status (used when not timed-out,
+    // or when timed-out but OOM also fired).
     let raw = child_raw_status.unwrap_or(0);
-    let (exit_status, oom_event) = if libc::WIFSIGNALED(raw) {
+    let exit_status = if oom_event {
+        // OOM kill confirmed via memory.events — authoritative classification.
+        SandboxExitStatus::OomKilled
+    } else if libc::WIFSIGNALED(raw) {
         let sig = libc::WTERMSIG(raw);
-        if sig == libc::SIGKILL {
-            (SandboxExitStatus::OomKilled, true)
-        } else {
-            (SandboxExitStatus::Clean(-sig), false)
-        }
+        SandboxExitStatus::Clean(-sig)
     } else if libc::WIFEXITED(raw) {
-        (SandboxExitStatus::Clean(libc::WEXITSTATUS(raw)), false)
+        SandboxExitStatus::Clean(libc::WEXITSTATUS(raw))
     } else {
-        (SandboxExitStatus::Clean(-1), false)
+        SandboxExitStatus::Clean(-1)
     };
 
     // When OOM-killed we also set cgroup_kill_event so tests can assert it.

@@ -263,3 +263,43 @@ pub fn kill_subtree(path: &Path) -> Result<(), SandboxError> {
     fs::write(&knob, "1\n")
         .map_err(|e| SandboxError::Cgroup(format!("write cgroup.kill {knob:?}: {e}")))
 }
+
+/// Disable swap for the cgroup by writing `"0\n"` to `<path>/memory.swap.max`.
+///
+/// This ensures memory-over-limit processes are OOM-killed promptly at the
+/// `memory.max` cap rather than thrashing swap until the timeout fires.
+/// The knob is unprivileged-writable in the delegated user leaf.
+pub fn write_memory_swap_max_zero(path: &Path) -> Result<(), SandboxError> {
+    let knob = path.join("memory.swap.max");
+    fs::write(&knob, "0\n")
+        .map_err(|e| SandboxError::Cgroup(format!("write memory.swap.max {knob:?}: {e}")))
+}
+
+/// Read `memory.events` from the cgroup at `path` and return the `oom_kill`
+/// counter.
+///
+/// The file contains lines of the form `<key> <value>\n`.  This function
+/// parses the `oom_kill` line and returns its value.  Returns `0` if the
+/// file is absent or the line is not present (e.g. no OOM event has
+/// occurred).
+pub fn read_oom_kill_count(path: &Path) -> Result<u64, SandboxError> {
+    let knob = path.join("memory.events");
+    let content = match fs::read_to_string(&knob) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => {
+            return Err(SandboxError::Cgroup(format!(
+                "read memory.events {knob:?}: {e}"
+            )))
+        }
+    };
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("oom_kill ") {
+            return rest.trim().parse::<u64>().map_err(|e| {
+                SandboxError::Cgroup(format!("parse oom_kill in memory.events: {e}"))
+            });
+        }
+    }
+    // Line absent → no OOM kill has occurred yet.
+    Ok(0)
+}
