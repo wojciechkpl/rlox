@@ -2,6 +2,11 @@
 
 All notable changes to rlox are documented here.
 
+## [Unreleased]
+
+### Added
+- **`rlox-sandbox` crate** — unprivileged Linux sandbox for executing untrusted code with hard isolation (Component 1 of agentic-benchmark MVP). Combines Linux user+pid+net+mnt namespaces, seccomp-BPF allowlist filter (blocks network, CLONE_NEWUSER, ptrace, etc.), and cgroup v2 resource limits (memory.max, pids.max, cpu.weight) with kill-safety via cgroup freeze + `cgroup.kill` (Linux 5.14+). Includes 22 regression tests covering benign execution, timeouts, and adversarial containment (fork bombs, memory bombs, stdout flooding, nested-userns denial, cgroup-base validation).
+
 ## [1.2.0] - 2026-05-05
 
 ### Added
