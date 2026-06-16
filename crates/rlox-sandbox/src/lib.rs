@@ -124,6 +124,6 @@ pub use worker::{
 pub use error::SandboxError;
 pub use server::{
     router, router_with_config, RolloutRequest, RolloutResponse, RolloutTask, SamplingParams,
-    SandboxRunConfig, ServerConfig, Trajectory,
+    SandboxRunConfig, ServerConfig, Trajectory, VerifyRequest, VerifyResponse,
 };
 pub use stats::BackendStats;

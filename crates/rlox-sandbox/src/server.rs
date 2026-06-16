@@ -575,6 +575,218 @@ async fn run_group_in_sandbox(
 }
 
 // ---------------------------------------------------------------------------
+// Verify request / response types
+// ---------------------------------------------------------------------------
+
+/// Request body for `POST /verify`.
+///
+/// Unlike `/rollout`, the code has **already been generated** by the caller.
+/// The handler scores it with a single sandbox execution and returns the
+/// reward signal — no vLLM call is made.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyRequest {
+    /// The generated code to sandbox-execute and score.
+    pub code: String,
+    /// The unit-test harness to run against `code`.
+    pub tests: String,
+    /// Whether this sample originates from the adversarial corpus.
+    pub is_adversarial: bool,
+}
+
+/// Response body for `POST /verify`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyResponse {
+    /// Sandbox pass-rate reward in [0.0, 1.0].
+    pub reward: f32,
+    /// Aggregated telemetry for this single verification run.
+    pub backend_stats: BackendStats,
+}
+
+// ---------------------------------------------------------------------------
+// /verify handler
+// ---------------------------------------------------------------------------
+
+/// Default wall-clock timeout (seconds) applied to each `/verify` sandbox run.
+///
+/// Chosen to be short enough for the adversarial containment test to complete
+/// within the CI suite timeout while still allowing legitimate code to run.
+const VERIFY_DEFAULT_TIMEOUT_SECS: f64 = 2.0;
+
+/// `POST /verify` handler.
+///
+/// Receives pre-generated code + a test suite, runs them through the sandbox
+/// **once** (no vLLM call), and returns `reward = pass_rate` plus
+/// `BackendStats` telemetry.
+///
+/// ## BackendStats semantics
+///
+/// - `rollouts_completed` is always 1.
+/// - `adversarial_injected` is 1 iff `is_adversarial == true`.
+/// - `adversarial_contained` is 1 iff `is_adversarial == true` AND the
+///   sandbox exit was `Timeout` or `OomKilled`.
+/// - `contagion_events` is 0 for any contained adversarial sample.
+/// - `setup_error_events` reflects cgroup/namespace infrastructure failures.
+/// - `time_to_contain_secs` never contains 0.0 sentinels; uses `wall_secs`
+///   as proxy when `time_to_contain_secs` from the sandbox is 0.0.
+async fn post_verify(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<VerifyRequest>,
+) -> Result<Json<VerifyResponse>, StatusCode> {
+    let wall_start = Instant::now();
+
+    // Derive cgroup_base from the current process uid (Linux only).
+    #[cfg(target_os = "linux")]
+    let cgroup_base: std::path::PathBuf = {
+        // SAFETY: getuid is always safe on Linux.
+        let uid = unsafe { libc::getuid() };
+        std::path::PathBuf::from(format!("/sys/fs/cgroup/user.slice/user-{uid}.slice"))
+    };
+
+    // Run the single sandbox execution.
+    #[cfg(target_os = "linux")]
+    let sandbox_out: crate::worker::SandboxOutput = {
+        use crate::worker::{
+            run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput, SandboxOutput,
+            SandboxStats,
+        };
+
+        let job_id = Uuid::new_v4();
+        let sandbox_cfg = SandboxConfig {
+            timeout_secs: VERIFY_DEFAULT_TIMEOUT_SECS,
+            mem_limit_bytes: state.config.sandbox.mem_limit_bytes,
+            pids_limit: state.config.sandbox.pids_limit,
+            cpu_weight: state.config.sandbox.cpu_weight,
+            cgroup_base: cgroup_base.clone(),
+        };
+        let input = SandboxInput {
+            job_id,
+            code: req.code.clone(),
+            test_suite: req.tests.clone(),
+            language: "python".to_string(),
+            is_adversarial: req.is_adversarial,
+        };
+
+        // Acquire a semaphore slot for the single sandbox run.
+        let permit = state
+            .sandbox_semaphore
+            .acquire()
+            .await
+            .expect("sandbox semaphore must not be closed");
+
+        let result = run_sandboxed(input, &sandbox_cfg).await.unwrap_or_else(|_| {
+            SandboxOutput {
+                job_id,
+                pass_rate: 0.0,
+                reward: 0.0,
+                stdout: String::new(),
+                exit_status: SandboxExitStatus::SetupError("sandbox error".to_string()),
+                stats: SandboxStats {
+                    wall_secs: 0.0,
+                    time_to_contain_secs: 0.0,
+                    cgroup_freeze_event: false,
+                    cgroup_kill_event: false,
+                    oom_event: false,
+                },
+            }
+        });
+
+        drop(permit);
+        result
+    };
+
+    // Extract reward from sandbox output (Linux only).
+    #[cfg(target_os = "linux")]
+    let reward: f32 = sandbox_out.pass_rate;
+
+    // Non-Linux compile stub (never executed in real tests).
+    #[cfg(not(target_os = "linux"))]
+    let reward: f32 = 0.0;
+
+    // Aggregate telemetry — mirrors the logic in `post_rollout`.
+    let adversarial_injected: u32 = if req.is_adversarial { 1 } else { 0 };
+    let mut adversarial_contained: u32 = 0;
+    let mut contagion_events: u32 = 0;
+    let mut setup_error_events: u32 = 0;
+    let mut time_to_contain_secs_vec: Vec<f64> = Vec::new();
+    let mut cgroup_freeze_events: u32 = 0;
+    let mut cgroup_kill_events: u32 = 0;
+    let mut oom_kill_events: u32 = 0;
+
+    #[cfg(target_os = "linux")]
+    {
+        let out = &sandbox_out;
+        match &out.exit_status {
+            crate::worker::SandboxExitStatus::SetupError(_) => {
+                setup_error_events += 1;
+            }
+            status => {
+                if req.is_adversarial {
+                    let is_contained = matches!(
+                        status,
+                        crate::worker::SandboxExitStatus::Timeout
+                            | crate::worker::SandboxExitStatus::OomKilled
+                    );
+                    if is_contained {
+                        adversarial_contained += 1;
+                        let ttc = if out.stats.time_to_contain_secs > 0.0 {
+                            out.stats.time_to_contain_secs
+                        } else {
+                            out.stats.wall_secs
+                        };
+                        if ttc > 0.0 {
+                            time_to_contain_secs_vec.push(ttc);
+                        } else {
+                            time_to_contain_secs_vec.push(f64::MIN_POSITIVE);
+                        }
+                    } else {
+                        contagion_events += 1;
+                    }
+                }
+            }
+        }
+
+        if out.stats.cgroup_freeze_event {
+            cgroup_freeze_events += 1;
+        }
+        if out.stats.cgroup_kill_event {
+            cgroup_kill_events += 1;
+        }
+        if out.stats.oom_event {
+            oom_kill_events += 1;
+        }
+    }
+
+    let batch_wall_secs = wall_start.elapsed().as_secs_f64();
+    let rollouts_per_sec = if batch_wall_secs > 0.0 {
+        1.0f32 / batch_wall_secs as f32
+    } else {
+        0.0
+    };
+
+    let backend_stats = BackendStats {
+        batch_wall_secs,
+        rollouts_completed: 1,
+        rollouts_per_sec,
+        tool_calls_per_sec: rollouts_per_sec,
+        adversarial_injected,
+        adversarial_contained,
+        contagion_events,
+        setup_error_events,
+        time_to_contain_secs: time_to_contain_secs_vec,
+        cgroup_freeze_events,
+        cgroup_kill_events,
+        oom_kill_events,
+        gpu_idle_attributable_to_hang_secs: 0.0,
+        step_index: 0,
+    };
+
+    Ok(Json(VerifyResponse {
+        reward,
+        backend_stats,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -631,5 +843,6 @@ pub fn router_with_config(config: ServerConfig) -> Router {
 
     Router::new()
         .route("/rollout", post(post_rollout))
+        .route("/verify", post(post_verify))
         .with_state(state)
 }
