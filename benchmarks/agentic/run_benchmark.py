@@ -87,3 +87,56 @@ def run_sweep(
                 run_index += 1
 
     return results
+
+
+def _build_grid(config) -> list[dict]:
+    """Return the full sweep grid (deterministic order) without executing it."""
+    grid: list[dict] = []
+    for condition in _CONDITIONS:
+        for seed in range(config.n_seeds):
+            for fraction in config.adversarial_fractions:
+                grid.append(
+                    {"condition": condition, "seed": seed, "fraction": fraction}
+                )
+    return grid
+
+
+def _main(argv=None) -> int:
+    import argparse
+    import sys
+    from pathlib import Path
+
+    # Make python/rlox/agentic importable for config.py when run as a script.
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo_root / "python" / "rlox" / "agentic"))
+    import config as _cfg  # noqa: E402
+
+    p = argparse.ArgumentParser(description="rlox agentic benchmark sweep driver")
+    p.add_argument("--config", required=True, help="path to benchmark_v*.yaml")
+    p.add_argument("--metric-store", required=True, help="output dir for per-run artifacts")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the planned run grid and exit (no execution, no GPU)")
+    args = p.parse_args(argv)
+
+    cfg = _cfg.load_config(args.config)
+    grid = _build_grid(cfg)
+
+    if args.dry_run:
+        print(f"[dry-run] sweep grid: {len(grid)} runs "
+              f"(2 conditions x {cfg.n_seeds} seeds x "
+              f"{len(cfg.adversarial_fractions)} fractions)")
+        for i, pt in enumerate(grid):
+            print(f"  {i:3d}  {pt['condition']:8s} seed={pt['seed']} "
+                  f"fraction={pt['fraction']}")
+        return 0
+
+    # Real execution path: enforce the pre-registered config (AC-2) first.
+    _cfg.validate_config(cfg)
+    raise SystemExit(
+        "The real run_one (prime-rl GRPO launcher) is wired at Step 8. "
+        "Use --dry-run to preview the grid."
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
