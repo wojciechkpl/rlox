@@ -1,0 +1,60 @@
+# benchmarks/agentic/configs/benchmark_v1.yaml
+#
+# Locked experimental constants for the rlox validation benchmark (AC-2).
+#
+# All fields MUST be set before any benchmark run executes.
+# Fields marked TODO/placeholder will be finalized at Step 8 when exact
+# version pins are confirmed from the live wk-system environment.
+#
+# validate_config() at harness startup raises ConfigValidationError if:
+#   - any required field is None, empty string, or missing
+#   - n_seeds < 3
+#   - adversarial_fractions does not include 0.0
+#   - any version pin does not match the running environment
+
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
+model_revision: "TODO-pin-exact-hf-revision-hash-at-step8"  # exact HuggingFace revision hash
+
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+dataset_split: "train"
+dataset_seed: 42
+
+# ---------------------------------------------------------------------------
+# Training hyperparameters (locked)
+# ---------------------------------------------------------------------------
+global_batch_size: 8
+rollout_count: 4
+max_seq_len: 4096
+reward_fn: "pass_rate"
+data_order_seed: 1234
+n_steps: 200
+n_seeds: 3
+warmup_steps: 5
+
+# ---------------------------------------------------------------------------
+# Adversarial sweep fractions (must include 0.0 as baseline)
+# ---------------------------------------------------------------------------
+adversarial_fractions:
+  - 0.0
+  - 0.01
+  - 0.05
+  - 0.10
+
+# ---------------------------------------------------------------------------
+# Sandbox / rollout config
+# ---------------------------------------------------------------------------
+per_sample_timeout_secs: 30.0
+
+# ---------------------------------------------------------------------------
+# Version pins (must match running environment at benchmark time)
+# Placeholders will be replaced with exact pins at Step 8.
+# ---------------------------------------------------------------------------
+primerl_commit: "TODO-pin-prime-rl-commit-hash-at-step8"
+verifiers_commit: "TODO-pin-verifiers-commit-hash-at-step8"
+vllm_version: "0.22.0+cu129"
+torch_version: "2.9.0"
+rlox_commit: "TODO-pin-rlox-commit-hash-at-step8"
