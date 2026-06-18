@@ -1,0 +1,358 @@
+{
+  "n_runs": 24,
+  "aggregate": [
+    {
+      "condition": "in_loop",
+      "fraction": 0.0,
+      "n": 3,
+      "survived": 3,
+      "mean_elapsed_secs": 39.0,
+      "mean_completed_steps": 6.0,
+      "mean_reward_last": 0.0
+    },
+    {
+      "condition": "in_loop",
+      "fraction": 0.01,
+      "n": 3,
+      "survived": 3,
+      "mean_elapsed_secs": 42.4,
+      "mean_completed_steps": 6.0,
+      "mean_reward_last": 0.0
+    },
+    {
+      "condition": "in_loop",
+      "fraction": 0.05,
+      "n": 3,
+      "survived": 3,
+      "mean_elapsed_secs": 44.0,
+      "mean_completed_steps": 6.0,
+      "mean_reward_last": 0.0
+    },
+    {
+      "condition": "in_loop",
+      "fraction": 0.1,
+      "n": 3,
+      "survived": 3,
+      "mean_elapsed_secs": 44.1,
+      "mean_completed_steps": 6.0,
+      "mean_reward_last": 0.0
+    },
+    {
+      "condition": "rlox",
+      "fraction": 0.0,
+      "n": 3,
+      "survived": 3,
+      "mean_elapsed_secs": 40.9,
+      "mean_completed_steps": 6.0,
+      "mean_reward_last": 0.0
+    },
+    {
+      "condition": "rlox",
+      "fraction": 0.01,
+      "n": 3,
+      "survived": 3,
+      "mean_elapsed_secs": 44.2,
+      "mean_completed_steps": 6.0,
+      "mean_reward_last": 0.0
+    },
+    {
+      "condition": "rlox",
+      "fraction": 0.05,
+      "n": 3,
+      "survived": 3,
+      "mean_elapsed_secs": 45.9,
+      "mean_completed_steps": 6.0,
+      "mean_reward_last": 0.0
+    },
+    {
+      "condition": "rlox",
+      "fraction": 0.1,
+      "n": 3,
+      "survived": 3,
+      "mean_elapsed_secs": 45.8,
+      "mean_completed_steps": 6.0,
+      "mean_reward_last": 0.0
+    }
+  ],
+  "p3_verdict": {
+    "treatment_survives_all_fractions": true,
+    "frac_0.05": {
+      "baseline_survived": "3/3",
+      "treatment_survived": "3/3",
+      "baseline_elapsed_x_vs_clean_baseline": 1.13,
+      "baseline_slower_than_treatment_x": 0.96
+    },
+    "frac_0.1": {
+      "baseline_survived": "3/3",
+      "treatment_survived": "3/3",
+      "baseline_elapsed_x_vs_clean_baseline": 1.13,
+      "baseline_slower_than_treatment_x": 0.96
+    }
+  },
+  "runs": [
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 39.24,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.0,
+      "seed": 0,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 39.29,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.01,
+      "seed": 0,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 39.27,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.05,
+      "seed": 0,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 39.28,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.1,
+      "seed": 0,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 42.71,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.0,
+      "seed": 1,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 52.7,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.01,
+      "seed": 1,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 52.7,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.05,
+      "seed": 1,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 47.73,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.1,
+      "seed": 1,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 35.15,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.0,
+      "seed": 2,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 35.15,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.01,
+      "seed": 2,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 40.17,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.05,
+      "seed": 2,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 45.14,
+      "backend": "in_loop",
+      "adversarial_fraction": 0.1,
+      "seed": 2,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 41.14,
+      "backend": "rlox",
+      "adversarial_fraction": 0.0,
+      "seed": 0,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 41.21,
+      "backend": "rlox",
+      "adversarial_fraction": 0.01,
+      "seed": 0,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 41.28,
+      "backend": "rlox",
+      "adversarial_fraction": 0.05,
+      "seed": 0,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 41.28,
+      "backend": "rlox",
+      "adversarial_fraction": 0.1,
+      "seed": 0,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 44.48,
+      "backend": "rlox",
+      "adversarial_fraction": 0.0,
+      "seed": 1,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 54.33,
+      "backend": "rlox",
+      "adversarial_fraction": 0.01,
+      "seed": 1,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 54.35,
+      "backend": "rlox",
+      "adversarial_fraction": 0.05,
+      "seed": 1,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 49.46,
+      "backend": "rlox",
+      "adversarial_fraction": 0.1,
+      "seed": 1,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 37.1,
+      "backend": "rlox",
+      "adversarial_fraction": 0.0,
+      "seed": 2,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 37.05,
+      "backend": "rlox",
+      "adversarial_fraction": 0.01,
+      "seed": 2,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 41.98,
+      "backend": "rlox",
+      "adversarial_fraction": 0.05,
+      "seed": 2,
+      "max_steps": 6,
+      "group_size": 4
+    },
+    {
+      "completed_steps": 6,
+      "survived": true,
+      "mean_reward_last": 0.0,
+      "elapsed_secs": 46.77,
+      "backend": "rlox",
+      "adversarial_fraction": 0.1,
+      "seed": 2,
+      "max_steps": 6,
+      "group_size": 4
+    }
+  ]
+}

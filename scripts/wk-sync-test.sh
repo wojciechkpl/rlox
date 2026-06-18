@@ -33,6 +33,8 @@ rsync -az --delete \
   --exclude 'benchmark_results/' --exclude 'results/' \
   --exclude 'sessions/' --exclude 'videos/' \
   --exclude 'site/' --exclude 'book/' --exclude 'mkdocs-docs/' \
+  --exclude 'benchmarks/agentic/sweep_out/' --exclude 'benchmarks/agentic/*_out/' \
+  --exclude 'benchmarks/agentic/pilot_results.json' \
   "$LOCAL_DIR/" "$REMOTE_HOST:$REMOTE_DIR/"
 
 if [ "$#" -gt 0 ]; then
