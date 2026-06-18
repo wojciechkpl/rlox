@@ -38,6 +38,12 @@ TRL / transformers API notes (versions in the prime-rl venv)
   ``PreTrainedTokenizerBase`` directly.
 * ``remove_unused_columns`` defaults to ``False`` in ``GRPOConfig``, so the
   ``tests`` column is preserved without any special override.
+
+Code extraction (FIX 2)
+-----------------------
+Qwen3 emits reasoning preambles before code.  ``extract_python_code`` strips
+these so the reward function actually executes the intended function body.
+Adversarial samples bypass extraction — they are already raw code snippets.
 """
 from __future__ import annotations
 
@@ -46,13 +52,11 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 import time
 from pathlib import Path
 from typing import Any
-
-import numpy as np
-import torch
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,6 +88,55 @@ EXECUTION_TIMEOUT_SECS: float = 5.0
 # has more rows than batch_size * group_size * max_steps.
 DATASET_REPEAT: int = 20
 
+# Default path to the adversarial corpus, relative to the repo root discovered
+# at runtime.  Can be overridden by --adversarial-corpus on the CLI, or by the
+# RLOX_ADVERSARIAL_CORPUS env var (CLI takes precedence over env var).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_ADVERSARIAL_CORPUS: Path = (
+    _REPO_ROOT / "benchmarks" / "agentic" / "corpus" / "adversarial_corpus_v1.json"
+)
+
+
+# ---------------------------------------------------------------------------
+# Code extraction (FIX 2)
+# ---------------------------------------------------------------------------
+
+# Regex patterns for fenced code blocks
+_FENCED_PYTHON = re.compile(r"```python\s*\n(.*?)```", re.DOTALL)
+_FENCED_GENERIC = re.compile(r"```\s*\n(.*?)```", re.DOTALL)
+
+
+def extract_python_code(text: str) -> str:
+    """Extract Python code from a model completion that may contain preamble text.
+
+    Extraction priority (first match wins):
+    1. Last ````python ... ```` fenced block.
+    2. Last ```` ``` ... ``` ```` fenced block (language-agnostic).
+    3. From the first ``def `` or ``import `` line to the end of the string.
+    4. Original text unchanged (no preamble detected).
+
+    This is intentionally applied only to model completions, NOT to injected
+    adversarial samples (those are raw, pre-validated code).
+    """
+    # 1. Try python-fenced block — take the last one in case the model emits
+    #    multiple (reasoning vs actual answer pattern).
+    python_matches = _FENCED_PYTHON.findall(text)
+    if python_matches:
+        return python_matches[-1].strip()
+
+    # 2. Try generic fenced block.
+    generic_matches = _FENCED_GENERIC.findall(text)
+    if generic_matches:
+        return generic_matches[-1].strip()
+
+    # 3. Fall back to first def/import line.
+    for i, line in enumerate(text.splitlines()):
+        if line.startswith("def ") or line.startswith("import ") or line.startswith("from "):
+            return "\n".join(text.splitlines()[i:]).strip()
+
+    # 4. Return as-is — no preamble markers found.
+    return text
+
 
 # ---------------------------------------------------------------------------
 # Seed helper
@@ -91,6 +144,9 @@ DATASET_REPEAT: int = 20
 
 
 def seed_everything(seed: int) -> None:
+    import numpy as np  # lazy: not available in test env
+    import torch  # lazy: not available in test env
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -139,6 +195,7 @@ def make_reward_func(
     adversarial_fraction: float,
     seed: int,
     rlox_server_url: str,
+    corpus_path: Path | str | None = None,
 ) -> "Callable[..., list[float]]":  # noqa: F821
     """Factory returning the TRL-compatible reward function.
 
@@ -151,30 +208,44 @@ def make_reward_func(
 
     Adversarial injection is seeded and stateless across calls (the injector
     carries its own RNG), so results are reproducible for a fixed seed.
+
+    Args:
+        corpus_path: path to the adversarial corpus JSON.  When
+            ``adversarial_fraction > 0`` this is REQUIRED.  Resolution order:
+            1. explicit ``corpus_path`` argument (CLI ``--adversarial-corpus``)
+            2. ``RLOX_ADVERSARIAL_CORPUS`` env var
+            3. hard-failure — FileNotFoundError is raised so the misconfiguration
+               is never silently swallowed.
     """
     from rlox_verify._adversarial import AdversarialCorpus, AdversarialInjector, AdversarialSample
     from rlox_verify._backend import call_rlox_server, extract_text, run_in_loop
 
     injector: AdversarialInjector | None = None
     if adversarial_fraction > 0.0:
-        # Corpus path is required when fraction > 0 — caller must supply it via
-        # RLOX_ADVERSARIAL_CORPUS env var or we skip injection with a warning.
-        corpus_path = os.environ.get("RLOX_ADVERSARIAL_CORPUS")
-        if corpus_path is None:
-            logger.warning(
-                "adversarial_fraction=%.2f but RLOX_ADVERSARIAL_CORPUS env var is not set; "
-                "falling back to fraction=0.0",
-                adversarial_fraction,
+        # Resolve corpus path: explicit arg > env var > hard failure.
+        resolved_corpus: str | None = (
+            str(corpus_path) if corpus_path is not None
+            else os.environ.get("RLOX_ADVERSARIAL_CORPUS")
+        )
+        if resolved_corpus is None:
+            raise FileNotFoundError(
+                f"adversarial_fraction={adversarial_fraction:.2f} but no corpus path was "
+                "provided.  Pass --adversarial-corpus <PATH> or set "
+                "RLOX_ADVERSARIAL_CORPUS env var."
             )
-        else:
-            corpus = AdversarialCorpus.load(corpus_path)
-            injector = AdversarialInjector(corpus=corpus, fraction=adversarial_fraction, seed=seed)
-            logger.info(
-                "AdversarialInjector ready: fraction=%.2f, corpus=%s, seed=%d",
-                adversarial_fraction,
-                corpus_path,
-                seed,
+        if not Path(resolved_corpus).exists():
+            raise FileNotFoundError(
+                f"Adversarial corpus not found at {resolved_corpus!r}.  "
+                "Pass --adversarial-corpus <PATH> pointing to adversarial_corpus_v1.json."
             )
+        corpus = AdversarialCorpus.load(resolved_corpus)
+        injector = AdversarialInjector(corpus=corpus, fraction=adversarial_fraction, seed=seed)
+        logger.info(
+            "injection ACTIVE: fraction=%.2f corpus=%s seed=%d",
+            adversarial_fraction,
+            resolved_corpus,
+            seed,
+        )
 
     _backend = backend
     _url = rlox_server_url
@@ -202,12 +273,15 @@ def make_reward_func(
                 task, is_adversarial = injector.maybe_inject(task)
 
             if isinstance(task, AdversarialSample):
+                # Adversarial samples are pre-formed code — run verbatim, no extraction.
                 code_text = task.code
                 tests_text = ""
             else:
                 # ``completions`` in TRL 1.5.1 are lists of message dicts
                 # (conversational) when the prompt was conversational.
-                code_text = extract_text(completion)
+                raw_text = extract_text(completion)
+                # Strip reasoning preambles emitted by Qwen3 before the actual code.
+                code_text = extract_python_code(raw_text)
                 tests_text = tests
 
             try:
@@ -295,9 +369,9 @@ def train(
     group_size: int,
     rlox_server_url: str,
     output_dir: Path,
+    corpus_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Run GRPO training and return a summary dict."""
-    import datasets as _ds
     from peft import LoraConfig, TaskType
     from transformers import AutoTokenizer
     from trl import GRPOConfig, GRPOTrainer
@@ -388,6 +462,7 @@ def train(
         adversarial_fraction=adversarial_fraction,
         seed=seed,
         rlox_server_url=rlox_server_url,
+        corpus_path=corpus_path,
     )
 
     # ------------------------------------------------------------------
@@ -507,6 +582,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Base URL of the rlox verify server (used when --backend=rlox).",
     )
     p.add_argument(
+        "--adversarial-corpus",
+        type=Path,
+        default=DEFAULT_ADVERSARIAL_CORPUS,
+        metavar="PATH",
+        help=(
+            "Path to adversarial_corpus_v1.json.  Required when "
+            "--adversarial-fraction > 0.  "
+            "RLOX_ADVERSARIAL_CORPUS env var is an optional override but this "
+            "CLI flag takes precedence."
+        ),
+    )
+    p.add_argument(
         "--output-dir",
         type=Path,
         default=Path("/home/wk/rlox/benchmarks/agentic/trl_grpo_out"),
@@ -520,12 +607,13 @@ def main(argv: list[str] | None = None) -> None:
 
     logger.info(
         "trl_grpo_run | backend=%s | adversarial_fraction=%.2f | seed=%d | "
-        "max_steps=%d | group_size=%d | output_dir=%s",
+        "max_steps=%d | group_size=%d | adversarial_corpus=%s | output_dir=%s",
         args.backend,
         args.adversarial_fraction,
         args.seed,
         args.max_steps,
         args.group_size,
+        args.adversarial_corpus,
         args.output_dir,
     )
 
@@ -537,6 +625,7 @@ def main(argv: list[str] | None = None) -> None:
         group_size=args.group_size,
         rlox_server_url=args.rlox_server_url,
         output_dir=args.output_dir,
+        corpus_path=args.adversarial_corpus,
     )
 
     # Non-zero exit code when training crashed, so CI pipelines can detect it.

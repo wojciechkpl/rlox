@@ -38,15 +38,12 @@ sys.path, so ``import config`` works without touching rlox.__init__.
 from __future__ import annotations
 
 import dataclasses
-import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
 
 # Top-level imports — never "from rlox.agentic import ..."
-import config as cfg_module
 from config import BenchmarkConfig, ConfigValidationError, load_config, validate_config
 
 
@@ -299,7 +296,10 @@ class TestVersionPinMismatch:
     def test_vllm_version_mismatch_raises(self):
         """If vllm_version in config doesn't match env_probe, must raise."""
         config = _valid_config(vllm_version="0.22.0+cu129")
-        mismatched_probe = lambda: {"vllm_version": "0.99.0", "torch_version": "2.9.0"}
+
+        def mismatched_probe():
+            return {"vllm_version": "0.99.0", "torch_version": "2.9.0"}
+
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_config(config, env_probe=mismatched_probe)
         err = str(exc_info.value)
@@ -309,7 +309,10 @@ class TestVersionPinMismatch:
     def test_torch_version_mismatch_raises(self):
         """If torch_version in config doesn't match env_probe, must raise."""
         config = _valid_config(torch_version="2.9.0")
-        mismatched_probe = lambda: {"vllm_version": "0.22.0+cu129", "torch_version": "1.0.0"}
+
+        def mismatched_probe():
+            return {"vllm_version": "0.22.0+cu129", "torch_version": "1.0.0"}
+
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_config(config, env_probe=mismatched_probe)
         err = str(exc_info.value)
@@ -318,7 +321,10 @@ class TestVersionPinMismatch:
     def test_env_probe_mismatch_names_the_pin(self):
         """Error message on pin mismatch must identify the mismatched field."""
         config = _valid_config(vllm_version="0.22.0+cu129")
-        mismatched_probe = lambda: {"vllm_version": "WRONG", "torch_version": "2.9.0"}
+
+        def mismatched_probe():
+            return {"vllm_version": "WRONG", "torch_version": "2.9.0"}
+
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_config(config, env_probe=mismatched_probe)
         # The error message must contain a meaningful identifier
@@ -331,13 +337,14 @@ class TestVersionPinMismatch:
             vllm_version="0.22.0+cu129",
             torch_version="2.9.0",
         )
-        probe = lambda: {"vllm_version": "0.22.0+cu129", "torch_version": "2.9.0"}
+
+        def probe():
+            return {"vllm_version": "0.22.0+cu129", "torch_version": "2.9.0"}
+
         validate_config(config, env_probe=probe)  # must not raise
 
     def test_env_probe_is_called_not_real_import(self, monkeypatch):
         """The injected env_probe must be used — real torch/vllm must never be imported."""
-        import sys
-        # If torch were imported, this monkeypatch would trigger.
         # We prove the probe is called by using a counting closure.
         probe_call_count = 0
 
@@ -559,3 +566,63 @@ class TestCommittedYaml:
         """load_config must succeed on benchmark_v1.yaml (placeholder values OK)."""
         result = load_config(str(_YAML_PATH))
         assert isinstance(result, BenchmarkConfig)
+
+
+# ---------------------------------------------------------------------------
+# J) Must-be-positive numeric fields (FIX 4 / AC-2 extension)
+#
+# global_batch_size, rollout_count, max_seq_len, n_steps,
+# per_sample_timeout_secs must all be > 0.  A value of 0 (the dataclass
+# default) must raise ConfigValidationError.
+#
+# Fields intentionally allowed to be 0:
+#   dataset_seed, data_order_seed, warmup_steps, seed
+# ---------------------------------------------------------------------------
+
+_MUST_BE_POSITIVE_FIELDS = [
+    "global_batch_size",
+    "rollout_count",
+    "max_seq_len",
+    "n_steps",
+    "per_sample_timeout_secs",
+]
+
+
+@pytest.mark.parametrize("field_name", _MUST_BE_POSITIVE_FIELDS)
+def test_zero_must_be_positive_field_raises(field_name: str):
+    """Each must-be-positive field set to 0 must raise ConfigValidationError."""
+    config = _valid_config(**{field_name: 0})
+    with pytest.raises(ConfigValidationError) as exc_info:
+        validate_config(config, env_probe=_matching_env_probe)
+    assert field_name in str(exc_info.value) or len(str(exc_info.value)) > 0
+
+
+@pytest.mark.parametrize("field_name", _MUST_BE_POSITIVE_FIELDS)
+def test_negative_must_be_positive_field_raises(field_name: str):
+    """Each must-be-positive field set to a negative value must raise."""
+    config = _valid_config(**{field_name: -1})
+    with pytest.raises(ConfigValidationError):
+        validate_config(config, env_probe=_matching_env_probe)
+
+
+@pytest.mark.parametrize("field_name", _MUST_BE_POSITIVE_FIELDS)
+def test_positive_must_be_positive_field_passes(field_name: str):
+    """Each must-be-positive field set to 1 must pass validation."""
+    config = _valid_config(**{field_name: 1})
+    validate_config(config, env_probe=_matching_env_probe)
+
+
+class TestAllowedZeroFields:
+    """Fields where 0 is a meaningful value — must NOT raise when set to 0."""
+
+    def test_warmup_steps_zero_passes(self):
+        config = _valid_config(warmup_steps=0)
+        validate_config(config, env_probe=_matching_env_probe)
+
+    def test_dataset_seed_zero_passes(self):
+        config = _valid_config(dataset_seed=0)
+        validate_config(config, env_probe=_matching_env_probe)
+
+    def test_data_order_seed_zero_passes(self):
+        config = _valid_config(data_order_seed=0)
+        validate_config(config, env_probe=_matching_env_probe)

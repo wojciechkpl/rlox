@@ -77,6 +77,18 @@ _REQUIRED_NUMERIC_FIELDS: tuple[str, ...] = (
     "per_sample_timeout_secs",
 )
 
+# Numeric fields that must be strictly positive (> 0) — a value of 0 indicates
+# "unset" and is not a valid configuration for a live benchmark run.
+# ``dataset_seed``, ``data_order_seed``, and ``warmup_steps`` are intentionally
+# excluded: 0 is a meaningful value for each of them.
+_MUST_BE_POSITIVE_FIELDS: tuple[str, ...] = (
+    "global_batch_size",
+    "rollout_count",
+    "max_seq_len",
+    "n_steps",
+    "per_sample_timeout_secs",
+)
+
 # Fields that are also version pins checked against env_probe output.
 _VERSION_PIN_FIELDS: tuple[str, ...] = (
     "vllm_version",
@@ -175,6 +187,15 @@ def validate_config(
         if value is None:
             raise ConfigValidationError(
                 f"Required field '{field_name}' must not be None"
+            )
+
+    # 2b. Validate must-be-positive fields (0 means "unset" for these).
+    for field_name in _MUST_BE_POSITIVE_FIELDS:
+        value = getattr(config, field_name, None)
+        if value is not None and value <= 0:
+            raise ConfigValidationError(
+                f"Required field '{field_name}' must be > 0 (got {value!r}); "
+                "a value of 0 indicates an unset placeholder."
             )
 
     # 3. n_seeds must be >= 3.

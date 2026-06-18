@@ -8,10 +8,147 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import subprocess
+import time
+from pathlib import Path
 from typing import Callable
 
+logger = logging.getLogger(__name__)
+
 _CONDITIONS: list[str] = ["in_loop", "rlox"]
+
+# Timeout for a single in_loop (Baseline) run.  The systemd-run wrapper
+# uses this so a runaway training process does not starve the host.
+_IN_LOOP_TIMEOUT_SECS: int = 7200  # 2 hours
+
+
+def make_trl_run_one(
+    *,
+    max_steps: int,
+    group_size: int,
+    rlox_server_url: str,
+    corpus_path: str | Path,
+    output_root: str | Path,
+    venv_python: str | Path,
+    repo_root: str | Path,
+    scope_for_baseline: bool = True,
+) -> Callable[[str, int, float], dict]:
+    """Build a ``run_one(condition, seed, fraction) -> dict`` callable.
+
+    The returned callable launches ``trl_grpo_run.py`` as a subprocess with
+    the appropriate flags for the given condition/seed/fraction triple.
+
+    For the ``in_loop`` (Baseline) condition the command is wrapped in
+    ``systemd-run --user --scope`` to bound its memory and task count, and in
+    ``timeout`` to cap wall-clock time.  The ``rlox`` (Treatment) condition
+    is launched directly (the rlox server provides its own resource isolation).
+
+    Returns a dict with:
+        ``{condition, seed, fraction, survived, completed_steps,
+           elapsed_secs, mean_reward_last}``
+
+    ``survived=False`` is returned (without raising) if:
+    * the subprocess exits with a non-zero return code
+    * no ``summary.json`` was written by the runner
+    * the subprocess times out
+    """
+    _venv_python = str(venv_python)
+    _repo_root = Path(repo_root)
+    _runner_script = str(_repo_root / "benchmarks" / "agentic" / "trl_grpo_run.py")
+    _output_root = Path(output_root)
+    _corpus_path = str(corpus_path)
+
+    def run_one(condition: str, seed: int, fraction: float) -> dict:
+        run_label = f"{condition}_seed{seed}_frac{fraction}"
+        run_output_dir = str(_output_root / run_label)
+
+        base_cmd: list[str] = [
+            _venv_python,
+            _runner_script,
+            "--backend", condition,
+            "--adversarial-fraction", str(fraction),
+            "--seed", str(seed),
+            "--max-steps", str(max_steps),
+            "--group-size", str(group_size),
+            "--adversarial-corpus", _corpus_path,
+            "--rlox-server-url", rlox_server_url,
+            "--output-dir", run_output_dir,
+        ]
+
+        if condition == "in_loop" and scope_for_baseline:
+            # Wrap in systemd-run scope for host-safety resource limits.
+            cmd: list[str] = [
+                "systemd-run",
+                "--user",
+                "--scope",
+                "-p", "TasksMax=2048",
+                "-p", "MemoryMax=40G",
+                "--quiet",
+                "timeout",
+                str(_IN_LOOP_TIMEOUT_SECS),
+                *base_cmd,
+            ]
+        else:
+            cmd = base_cmd
+
+        env = dict(os.environ)
+        env["CUDA_VISIBLE_DEVICES"] = "0"
+
+        t0 = time.monotonic()
+        try:
+            proc = subprocess.run(
+                cmd,
+                env=env,
+                capture_output=False,
+            )
+            returncode = proc.returncode
+        except Exception as exc:
+            logger.error("run_one(%s, %d, %.2f) subprocess error: %s", condition, seed, fraction, exc)
+            elapsed = time.monotonic() - t0
+            return {
+                "condition": condition,
+                "seed": seed,
+                "fraction": fraction,
+                "survived": False,
+                "completed_steps": 0,
+                "elapsed_secs": round(elapsed, 2),
+                "mean_reward_last": 0.0,
+            }
+
+        elapsed = time.monotonic() - t0
+        summary_path = Path(run_output_dir) / "summary.json"
+
+        if returncode != 0 or not summary_path.exists():
+            logger.warning(
+                "run_one(%s, %d, %.2f) failed: returncode=%d summary_exists=%s",
+                condition, seed, fraction, returncode, summary_path.exists(),
+            )
+            return {
+                "condition": condition,
+                "seed": seed,
+                "fraction": fraction,
+                "survived": False,
+                "completed_steps": 0,
+                "elapsed_secs": round(elapsed, 2),
+                "mean_reward_last": 0.0,
+            }
+
+        with summary_path.open(encoding="utf-8") as fh:
+            summary = json.load(fh)
+
+        return {
+            "condition": condition,
+            "seed": seed,
+            "fraction": fraction,
+            "survived": bool(summary.get("survived", False)),
+            "completed_steps": int(summary.get("completed_steps", 0)),
+            "elapsed_secs": round(elapsed, 2),
+            "mean_reward_last": float(summary.get("mean_reward_last", 0.0)),
+        }
+
+    return run_one
 
 
 def run_sweep(
