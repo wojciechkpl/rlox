@@ -45,6 +45,7 @@ Qwen3 emits reasoning preambles before code.  ``extract_python_code`` strips
 these so the reward function actually executes the intended function body.
 Adversarial samples bypass extraction — they are already raw code snippets.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -131,7 +132,11 @@ def extract_python_code(text: str) -> str:
 
     # 3. Fall back to first def/import line.
     for i, line in enumerate(text.splitlines()):
-        if line.startswith("def ") or line.startswith("import ") or line.startswith("from "):
+        if (
+            line.startswith("def ")
+            or line.startswith("import ")
+            or line.startswith("from ")
+        ):
             return "\n".join(text.splitlines()[i:]).strip()
 
     # 4. Return as-is — no preamble markers found.
@@ -217,14 +222,19 @@ def make_reward_func(
             3. hard-failure — FileNotFoundError is raised so the misconfiguration
                is never silently swallowed.
     """
-    from rlox_verify._adversarial import AdversarialCorpus, AdversarialInjector, AdversarialSample
+    from rlox_verify._adversarial import (
+        AdversarialCorpus,
+        AdversarialInjector,
+        AdversarialSample,
+    )
     from rlox_verify._backend import call_rlox_server, extract_text, run_in_loop
 
     injector: AdversarialInjector | None = None
     if adversarial_fraction > 0.0:
         # Resolve corpus path: explicit arg > env var > hard failure.
         resolved_corpus: str | None = (
-            str(corpus_path) if corpus_path is not None
+            str(corpus_path)
+            if corpus_path is not None
             else os.environ.get("RLOX_ADVERSARIAL_CORPUS")
         )
         if resolved_corpus is None:
@@ -239,7 +249,9 @@ def make_reward_func(
                 "Pass --adversarial-corpus <PATH> pointing to adversarial_corpus_v1.json."
             )
         corpus = AdversarialCorpus.load(resolved_corpus)
-        injector = AdversarialInjector(corpus=corpus, fraction=adversarial_fraction, seed=seed)
+        injector = AdversarialInjector(
+            corpus=corpus, fraction=adversarial_fraction, seed=seed
+        )
         logger.info(
             "injection ACTIVE: fraction=%.2f corpus=%s seed=%d",
             adversarial_fraction,
@@ -264,7 +276,9 @@ def make_reward_func(
         tests_list: list[str] = kwargs.get("tests", [""] * len(prompts))
         rewards: list[float] = []
 
-        for prompt, completion, tests in zip(prompts, completions, tests_list, strict=False):
+        for prompt, completion, tests in zip(
+            prompts, completions, tests_list, strict=False
+        ):
             # Build a lightweight task dict for the injector.
             task: Any = {"prompt": prompt, "answer": ""}
             is_adversarial = False
@@ -286,7 +300,9 @@ def make_reward_func(
 
             try:
                 if _backend == "rlox":
-                    r = call_rlox_server(code_text, tests_text, is_adversarial, _url, _timeout)
+                    r = call_rlox_server(
+                        code_text, tests_text, is_adversarial, _url, _timeout
+                    )
                 else:
                     r = run_in_loop(code_text, tests_text, _timeout)
             except Exception as exc:
@@ -305,7 +321,9 @@ def make_reward_func(
 # ---------------------------------------------------------------------------
 
 
-def _make_metrics_callback(output_dir: Path) -> tuple["TrainerCallback", "Callable[[], list[dict]]"]:  # noqa: F821
+def _make_metrics_callback(
+    output_dir: Path,
+) -> tuple["TrainerCallback", "Callable[[], list[dict]]"]:  # noqa: F821
     """Build a TrainerCallback that writes per-step metrics to a JSONL file.
 
     Returns ``(callback_instance, close_fn)`` where ``close_fn()`` closes the
@@ -335,15 +353,31 @@ def _make_metrics_callback(output_dir: Path) -> tuple["TrainerCallback", "Callab
             if logs is None:
                 return
             step = state.global_step
-            # TRL 1.5.1 logs reward under "reward"; older or future versions
-            # may use "rewards/reward_func" or "train/reward".  Try all.
-            mean_reward = float(
-                logs.get("reward")
-                or logs.get("rewards/reward_func")
-                or logs.get("train/reward")
-                or 0.0
+            # TRL 1.5.1 emits both "reward" and "rewards/reward_func/mean".
+            # Older TRL versions may use "rewards/reward_func" or "train/reward".
+            # Use explicit key-presence checks (not `or`) so that a value of 0.0
+            # is captured correctly and not short-circuited to a fallback.
+            _REWARD_KEYS = (
+                "reward",
+                "rewards/reward_func/mean",
+                "rewards/reward_func",
+                "train/reward",
             )
-            row = {"step": step, "mean_reward": mean_reward, **logs}
+            mean_reward: float = 0.0
+            has_reward_key = False
+            for _key in _REWARD_KEYS:
+                if _key in logs:
+                    mean_reward = float(logs[_key])
+                    has_reward_key = True
+                    break
+            row = {
+                "step": step,
+                "mean_reward": mean_reward,
+                # Sentinel so _compute_reward_summary can filter out the
+                # terminal train_runtime log event that TRL emits after training.
+                "_has_reward": has_reward_key,
+                **logs,
+            }
             rows.append(row)
             fh.write(json.dumps(row) + "\n")
             fh.flush()
@@ -354,6 +388,47 @@ def _make_metrics_callback(output_dir: Path) -> tuple["TrainerCallback", "Callab
         return rows
 
     return _MetricsCallback(), close
+
+
+# ---------------------------------------------------------------------------
+# Reward summary helper
+# ---------------------------------------------------------------------------
+
+
+def _compute_reward_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute final_reward, mean_reward, and reward_curve from per-step metric rows.
+
+    Filters to only rows that have ``_has_reward=True`` (set by
+    _MetricsCallback.on_log when a recognised reward key was found in the TRL
+    log dict).  This excludes TRL's terminal ``train_runtime`` summary log event
+    which has no reward key and would otherwise corrupt ``final_reward``.
+
+    Returns a dict with:
+        final_reward  — reward at the last training step (0.0 if no rows)
+        mean_reward   — arithmetic mean over training-step rows (0.0 if none)
+        reward_curve  — list[float] of per-step rewards in emission order
+        mean_reward_last — alias for final_reward (backward compat)
+    """
+    # Keep only rows that originated from a training-step log event.
+    training_rows = [r for r in rows if r.get("_has_reward")]
+
+    if not training_rows:
+        return {
+            "final_reward": 0.0,
+            "mean_reward": 0.0,
+            "reward_curve": [],
+            "mean_reward_last": 0.0,
+        }
+
+    reward_curve = [float(r.get("mean_reward", 0.0)) for r in training_rows]
+    final_reward = reward_curve[-1]
+    mean_reward = sum(reward_curve) / len(reward_curve)
+    return {
+        "final_reward": final_reward,
+        "mean_reward": round(mean_reward, 6),
+        "reward_curve": reward_curve,
+        "mean_reward_last": final_reward,  # backward-compat alias
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +566,9 @@ def train(
     # ------------------------------------------------------------------
     # Train
     # ------------------------------------------------------------------
-    logger.info("Starting GRPO training: max_steps=%d, group_size=%d", max_steps, group_size)
+    logger.info(
+        "Starting GRPO training: max_steps=%d, group_size=%d", max_steps, group_size
+    )
     survived = True
     exception_msg: str | None = None
     t0 = time.perf_counter()
@@ -510,18 +587,18 @@ def train(
     # Summary
     # ------------------------------------------------------------------
     completed_steps = trainer.state.global_step if hasattr(trainer, "state") else 0
-    mean_reward_last = rows[-1].get("mean_reward", 0.0) if rows else 0.0
+    reward_summary = _compute_reward_summary(rows)
 
     summary: dict[str, Any] = {
         "completed_steps": completed_steps,
         "survived": survived,
-        "mean_reward_last": mean_reward_last,
         "elapsed_secs": round(elapsed, 2),
         "backend": backend,
         "adversarial_fraction": adversarial_fraction,
         "seed": seed,
         "max_steps": max_steps,
         "group_size": group_size,
+        **reward_summary,
     }
     if exception_msg is not None:
         summary["exception"] = exception_msg

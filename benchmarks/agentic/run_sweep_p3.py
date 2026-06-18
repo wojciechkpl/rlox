@@ -25,9 +25,9 @@ sys.path.insert(0, str(REPO / "python" / "rlox" / "agentic"))
 import run_benchmark  # noqa: E402
 
 # Cap a single Baseline run so a stall can't run for the default 2h.
-run_benchmark._IN_LOOP_TIMEOUT_SECS = 900  # 15 min/run
+run_benchmark._IN_LOOP_TIMEOUT_SECS = 1800  # 30 min/run
 
-MAX_STEPS = 6
+MAX_STEPS = 30          # longer runs: accumulate adversarial load + show learning
 GROUP_SIZE = 4
 SERVER_URL = "http://localhost:8231"
 
