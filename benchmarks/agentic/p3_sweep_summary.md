@@ -1,35 +1,41 @@
-# rlox benchmark — P3 sweep result
+# rlox benchmark — P3 sweep result (30-step, final)
 
-24 runs (2 conditions x seeds x fractions), Qwen3-4B-Instruct-2507 + LoRA, 6 GRPO steps each, single RTX 5090.
+Pre-registered grid: 2 conditions × 3 seeds × 4 injection fractions = 24 runs.
+GRPO post-training of Qwen3-4B-Instruct-2507 + LoRA, 30 steps each, single RTX 5090.
+Baseline = in-process (`in_loop`) code execution; Treatment = rlox sandbox (`/verify`,
+out-of-process, hard-isolated). Same adversarial injection in both.
 
-P3 = adversarial-code containment. **Treatment** = rlox sandbox (`/verify`, out-of-process). **Baseline** = in-process `in_loop` exec (scope-bounded for host safety).
+## P3 — run survival vs injection (authoritative, includes DNF/timeout failures)
 
-| condition | injection | survived | mean steps | mean reward | mean elapsed (s) |
-|---|---|---|---|---|---|
-| in_loop | 0.00 | 3/3 | 6.0 | 0.0 | 39.0 |
-| in_loop | 0.01 | 3/3 | 6.0 | 0.0 | 42.4 |
-| in_loop | 0.05 | 3/3 | 6.0 | 0.0 | 44.0 |
-| in_loop | 0.10 | 3/3 | 6.0 | 0.0 | 44.1 |
-| rlox | 0.00 | 3/3 | 6.0 | 0.0 | 40.9 |
-| rlox | 0.01 | 3/3 | 6.0 | 0.0 | 44.2 |
-| rlox | 0.05 | 3/3 | 6.0 | 0.0 | 45.9 |
-| rlox | 0.10 | 3/3 | 6.0 | 0.0 | 45.8 |
+| runs survived | 0% | 1% | 5% | 10% |
+|---|---|---|---|---|
+| **Baseline** (in-loop) | 3/3 | 3/3 | **2/3** | **1/3** |
+| **Treatment** (rlox)   | 3/3 | 3/3 | **3/3** | **3/3** |
 
-## P3 verdict
-```json
-{
-  "treatment_survives_all_fractions": true,
-  "frac_0.05": {
-    "baseline_survived": "3/3",
-    "treatment_survived": "3/3",
-    "baseline_elapsed_x_vs_clean_baseline": 1.13,
-    "baseline_slower_than_treatment_x": 0.96
-  },
-  "frac_0.1": {
-    "baseline_survived": "3/3",
-    "treatment_survived": "3/3",
-    "baseline_elapsed_x_vs_clean_baseline": 1.13,
-    "baseline_slower_than_treatment_x": 0.96
-  }
-}
-```
+Meets the pre-registered P3 criterion: at 5–10% injection the Baseline shows ≥1
+crash/stall (DNF: stalled past the 30-min per-run cap and was killed — in-loop fork
+bombs starve the trainer) while rlox completes **all** runs. Completed Baseline runs at
+5% take 542 s vs 181 s clean (3.0×); Treatment stays bounded (~310–432 s — it pays the
+per-sample containment latency but never stalls/accumulates, because the sandbox
+`cgroup.kill`s the whole subtree).
+
+## Guardrail — quality parity (fraction 0%)
+
+PASSED. Baseline final reward **0.917** = Treatment **0.917** (abs diff **0.0**); the
+model genuinely learns (~0.9 unit-test pass rate). The sandbox changes safety, not
+learning dynamics.
+
+## P1 — throughput/utilization
+
+Not measured on a single GPU (single-process TRL trainer has no rollout/training
+decoupling to exploit); deferred to a multi-GPU/async setup. P1 is established prior
+art (ProRL-Agent, SkyRL); rlox's novel contribution is P3.
+
+## Notes
+- `aggregate_sweep.py` reads per-run `summary.json`, which the 3 DNF Baseline runs never
+  wrote; survival above is from the `metric_store` records (24 grid points). `plot_sweep.py`
+  uses the metric store for the survival figure.
+- Figures: `fig_survival`, `fig_step_time_stall`, `fig_p3_degradation`, `fig_guardrail`
+  (rendered by `plot_sweep.py`; report + figures in `rlox-priv/reports/`).
+- Scale-dependence: the 5% Baseline slowdown grew 1.13× (6 steps) → 3.0× (30 steps); P3
+  effect scales with cumulative adversarial exposure.

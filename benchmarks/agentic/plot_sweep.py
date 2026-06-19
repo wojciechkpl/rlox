@@ -52,6 +52,18 @@ def _load_runs(runs_dir: Path) -> list[dict]:
     return runs
 
 
+def _load_metric_store(sweep_dir: Path) -> list[dict]:
+    """Authoritative per-grid-point survival (includes DNF/timeout runs that
+    never wrote a summary.json). Written by run_sweep."""
+    recs = []
+    for mf in sorted((sweep_dir / "metric_store").glob("*.json")):
+        try:
+            recs.append(json.loads(mf.read_text()))
+        except Exception:
+            pass
+    return recs
+
+
 def _by(runs, cond=None, frac=None):
     out = []
     for r in runs:
@@ -151,19 +163,29 @@ def main() -> int:
     fig3.tight_layout()
     fig3.savefig(out / "fig_guardrail.png", dpi=140)
 
-    # --- Fig 4: survival vs fraction -----------------------------------------
+    # --- Fig 4: survival vs fraction (authoritative incl. DNF) ---------------
+    mstore = _load_metric_store(sweep)
+
+    def _ms_by(cond, frac):
+        return [r for r in mstore
+                if r.get("condition") == cond
+                and abs(float(r.get("fraction", 0)) - frac) < 1e-9]
+
+    surv_src = mstore if mstore else runs
+    surv_fracs = sorted({round(float(r.get("fraction", r.get("adversarial_fraction", 0))), 4)
+                         for r in surv_src})
     fig4, ax = plt.subplots(figsize=(6, 4))
     width = 0.35
-    xs = list(range(len(fracs)))
+    xs = list(range(len(surv_fracs)))
     for i, c in enumerate(CONDITIONS):
         rates = []
-        for f in fracs:
-            rs = _by(runs, c, f)
+        for f in surv_fracs:
+            rs = _ms_by(c, f) if mstore else _by(runs, c, f)
             rates.append(100 * sum(1 for r in rs if r.get("survived")) / len(rs) if rs else 0)
         ax.bar([x + (i - 0.5) * width for x in xs], rates, width,
                color=COLORS[c], label=LABELS[c])
     ax.set_xticks(xs)
-    ax.set_xticklabels([f"{f*100:.0f}%" for f in fracs])
+    ax.set_xticklabels([f"{f*100:.0f}%" for f in surv_fracs])
     ax.set_xlabel("adversarial injection")
     ax.set_ylabel("runs survived (%)")
     ax.set_title("Run survival vs injection")
