@@ -13,9 +13,11 @@ Key design decisions
 * ``bf16=True`` + ``gradient_checkpointing=True`` for memory efficiency.
 * Reward function reuses ``rlox_verify._backend`` and ``_adversarial``
   directly — the package is pip-installed in the prime-rl venv.
-* Dataset: the 8 MBPP-style problems from ``rlox_verify._CODING_PROBLEMS``
-  repeated to give the trainer enough rows; each row carries a ``tests``
-  column that the reward function reads via ``**kwargs``.
+* Dataset: 50 MBPP problems loaded via ``rlox_verify._load_mbpp_problems``
+  (seeded, deterministic slice) repeated to give the trainer enough rows;
+  each row carries a ``tests`` column that the reward function reads via
+  ``**kwargs``.  Falls back to the embedded 40-problem list when MBPP is
+  unavailable (set RLOX_NO_MBPP=1 to force the fallback).
 
 Usage (single-GPU, no accelerate launcher needed):
 
@@ -44,6 +46,16 @@ Code extraction (FIX 2)
 Qwen3 emits reasoning preambles before code.  ``extract_python_code`` strips
 these so the reward function actually executes the intended function body.
 Adversarial samples bypass extraction — they are already raw code snippets.
+
+GPU-utilization capture
+-----------------------
+A background daemon thread polls ``nvidia-smi --query-gpu=utilization.gpu``
+every ~1 second during training and computes ``mean_gpu_util``,
+``min_gpu_util``, and ``gpu_util_samples`` which are written into
+``summary.json``.  These fields quantify the GPU-idle effect: under in-loop
+adversarial injection the GPU idles while sandboxed code runs, whereas the
+Treatment (rlox server) keeps the GPU busy.  The sampler is only started if
+CUDA is available; on CPU-only hosts all three fields are set to ``null``.
 """
 
 from __future__ import annotations
@@ -54,7 +66,9 @@ import logging
 import os
 import random
 import re
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -85,9 +99,15 @@ LORA_TARGET_MODULES = [
 # Per-completion execution timeout forwarded to rlox_verify._backend.
 EXECUTION_TIMEOUT_SECS: float = 5.0
 
-# Dataset repetitions: repeat the 8-problem set enough times so TRL always
+# Dataset repetitions: repeat the problem set enough times so TRL always
 # has more rows than batch_size * group_size * max_steps.
-DATASET_REPEAT: int = 20
+# With 50 MBPP problems and DATASET_REPEAT=4 we get 200 rows — sufficient
+# for up to 60 steps × group_size 4 = 240 rollouts (TRL samples with
+# replacement when the dataset is exhausted, so 200 rows is fine).
+DATASET_REPEAT: int = 4
+
+# GPU utilisation polling interval in seconds.
+GPU_POLL_INTERVAL_SECS: float = 1.0
 
 # Default path to the adversarial corpus, relative to the repo root discovered
 # at runtime.  Can be overridden by --adversarial-corpus on the CLI, or by the
@@ -167,16 +187,26 @@ def seed_everything(seed: int) -> None:
 def build_dataset(group_size: int) -> "datasets.Dataset":  # noqa: F821
     """Return a datasets.Dataset with ``prompt`` (list[dict]) and ``tests`` columns.
 
-    Each ``prompt`` is a list of chat messages so TRL's ``is_conversational``
-    check passes and ``apply_chat_template`` is called automatically inside
-    ``_tokenize_prompts``.
+    Loads a fixed, seeded slice of MBPP via ``rlox_verify._load_mbpp_problems``
+    and repeats it ``DATASET_REPEAT`` times so TRL always has more rows than
+    ``batch_size * group_size * max_steps``.  Each ``prompt`` is a list of chat
+    messages so TRL's ``is_conversational`` check passes and
+    ``apply_chat_template`` is called automatically inside ``_tokenize_prompts``.
+
+    Falls back to the embedded ``_FALLBACK_PROBLEMS`` list when MBPP is
+    unavailable (network error, ``RLOX_NO_MBPP=1``, etc.).
     """
     import datasets as _ds
 
-    from rlox_verify import _CODING_PROBLEMS
+    from rlox_verify import _load_mbpp_problems
+
+    # _load_mbpp_problems handles MBPP→fallback gracefully and logs which path
+    # was taken.
+    mbpp_problems = _load_mbpp_problems()
+    n_unique = len(mbpp_problems)
 
     rows: list[dict[str, Any]] = []
-    for problem in _CODING_PROBLEMS * DATASET_REPEAT:
+    for problem in mbpp_problems * DATASET_REPEAT:
         rows.append(
             {
                 # conversational format — list of message dicts
@@ -186,7 +216,13 @@ def build_dataset(group_size: int) -> "datasets.Dataset":  # noqa: F821
         )
 
     ds = _ds.Dataset.from_list(rows)
-    logger.info("Dataset built: %d rows (group_size=%d)", len(ds), group_size)
+    logger.info(
+        "Dataset built: %d unique problems × %d repeats = %d rows (group_size=%d)",
+        n_unique,
+        DATASET_REPEAT,
+        len(ds),
+        group_size,
+    )
     return ds
 
 
@@ -432,6 +468,89 @@ def _compute_reward_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# GPU-utilisation background sampler
+# ---------------------------------------------------------------------------
+
+
+def _start_gpu_util_sampler(
+    stop_event: threading.Event,
+    interval_secs: float = GPU_POLL_INTERVAL_SECS,
+) -> list[float]:
+    """Start a daemon thread that polls ``nvidia-smi`` every *interval_secs*.
+
+    The thread appends GPU-utilisation readings (0–100) to the returned list
+    while ``stop_event`` is not set.  The list is shared by reference so the
+    caller can inspect it after calling ``stop_event.set()``.
+
+    Returns:
+        A ``list[float]`` that the background thread appends readings to.
+        The thread is a daemon so it will be killed if the main process exits.
+
+    Note:
+        If ``nvidia-smi`` is unavailable (no GPU, no CUDA toolkit) the thread
+        logs a single WARNING and exits immediately — the list stays empty and
+        the caller treats that as ``gpu_util_samples == 0``.
+    """
+    samples: list[float] = []
+
+    def _poll() -> None:
+        while not stop_event.is_set():
+            try:
+                result = subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=utilization.gpu",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.strip().splitlines():
+                        line = line.strip()
+                        if line:
+                            try:
+                                samples.append(float(line.split()[0]))
+                            except ValueError:
+                                pass
+            except FileNotFoundError:
+                logger.warning(
+                    "nvidia-smi not found — GPU utilisation will not be recorded"
+                )
+                return
+            except Exception as exc:
+                logger.debug("GPU sampler poll error (non-fatal): %s", exc)
+            stop_event.wait(timeout=interval_secs)
+
+    t = threading.Thread(target=_poll, daemon=True, name="gpu_util_sampler")
+    t.start()
+    return samples
+
+
+def _summarise_gpu_util(samples: list[float]) -> dict[str, Any]:
+    """Convert a list of GPU-util readings into summary fields.
+
+    Returns:
+        dict with keys ``mean_gpu_util``, ``min_gpu_util``,
+        ``gpu_util_samples``.  All three are ``None`` when ``samples`` is empty
+        (no GPU or sampler error), so JSON serialisation uses ``null`` which
+        aggregate_sweep.py can handle gracefully.
+    """
+    if not samples:
+        return {
+            "mean_gpu_util": None,
+            "min_gpu_util": None,
+            "gpu_util_samples": 0,
+        }
+    return {
+        "mean_gpu_util": round(sum(samples) / len(samples), 2),
+        "min_gpu_util": round(min(samples), 2),
+        "gpu_util_samples": len(samples),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main training entry point
 # ---------------------------------------------------------------------------
 
@@ -564,13 +683,18 @@ def train(
     )
 
     # ------------------------------------------------------------------
-    # Train
+    # Train  (with background GPU-util sampler)
     # ------------------------------------------------------------------
     logger.info(
         "Starting GRPO training: max_steps=%d, group_size=%d", max_steps, group_size
     )
     survived = True
     exception_msg: str | None = None
+
+    # Start GPU-util sampler before training begins.
+    _gpu_stop = threading.Event()
+    gpu_samples = _start_gpu_util_sampler(_gpu_stop)
+
     t0 = time.perf_counter()
 
     try:
@@ -579,9 +703,20 @@ def train(
         survived = False
         exception_msg = f"{type(exc).__name__}: {exc}"
         logger.error("Training failed: %s", exception_msg)
+    finally:
+        # Always stop the sampler so it doesn't keep running after training.
+        _gpu_stop.set()
 
     elapsed = time.perf_counter() - t0
     rows = metrics_close()
+
+    gpu_util_summary = _summarise_gpu_util(gpu_samples)
+    logger.info(
+        "GPU-util summary: mean=%.1f%% min=%.1f%% samples=%d",
+        gpu_util_summary.get("mean_gpu_util") or 0.0,
+        gpu_util_summary.get("min_gpu_util") or 0.0,
+        gpu_util_summary.get("gpu_util_samples", 0),
+    )
 
     # ------------------------------------------------------------------
     # Summary
@@ -599,6 +734,7 @@ def train(
         "max_steps": max_steps,
         "group_size": group_size,
         **reward_summary,
+        **gpu_util_summary,
     }
     if exception_msg is not None:
         summary["exception"] = exception_msg

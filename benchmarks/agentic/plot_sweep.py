@@ -16,6 +16,7 @@ Produces (PNG) in --out-dir:
 Usage:
     python benchmarks/agentic/plot_sweep.py --sweep-dir <dir> --out-dir <dir>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -69,7 +70,10 @@ def _by(runs, cond=None, frac=None):
     for r in runs:
         if cond is not None and r.get("backend") != cond:
             continue
-        if frac is not None and abs(float(r.get("adversarial_fraction", 0)) - frac) > 1e-9:
+        if (
+            frac is not None
+            and abs(float(r.get("adversarial_fraction", 0)) - frac) > 1e-9
+        ):
             continue
         out.append(r)
     return out
@@ -92,6 +96,7 @@ def main() -> int:
 
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
@@ -102,7 +107,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     runs = _load_runs(sweep / "runs")
     if not runs:
-        raise SystemExit(f"no runs under {sweep/'runs'}")
+        raise SystemExit(f"no runs under {sweep / 'runs'}")
     fracs = _fractions(runs)
     print(f"loaded {len(runs)} runs, fractions={fracs}")
 
@@ -110,7 +115,9 @@ def main() -> int:
     fig1, ax = plt.subplots(figsize=(6, 4))
     for c in CONDITIONS:
         ys = [_mean([float(r["elapsed_secs"]) for r in _by(runs, c, f)]) for f in fracs]
-        ax.plot([f * 100 for f in fracs], ys, "o-", color=COLORS[c], label=LABELS[c], lw=2)
+        ax.plot(
+            [f * 100 for f in fracs], ys, "o-", color=COLORS[c], label=LABELS[c], lw=2
+        )
     ax.set_xlabel("adversarial injection (%)")
     ax.set_ylabel("mean wall-clock per run (s)")
     ax.set_title("P3: in-loop adversarial code stalls training; sandbox does not")
@@ -135,7 +142,7 @@ def main() -> int:
             ax.plot(xs, ys, "-", color=COLORS[c], label=LABELS[c], lw=2)
     ax.set_xlabel("GRPO step")
     ax.set_ylabel("step time (s)")
-    ax.set_title(f"Per-step stall at {fmax*100:.0f}% injection")
+    ax.set_title(f"Per-step stall at {fmax * 100:.0f}% injection")
     ax.legend()
     ax.grid(alpha=0.3)
     fig2.tight_layout()
@@ -146,7 +153,9 @@ def main() -> int:
     for c in CONDITIONS:
         per_step = defaultdict(list)
         for r in _by(runs, c, 0.0):
-            curve = r.get("reward_curve") or [s.get("reward") for s in r.get("_steps", [])]
+            curve = r.get("reward_curve") or [
+                s.get("reward") for s in r.get("_steps", [])
+            ]
             for i, v in enumerate(curve, start=1):
                 if v is not None:
                     per_step[i].append(float(v))
@@ -167,13 +176,20 @@ def main() -> int:
     mstore = _load_metric_store(sweep)
 
     def _ms_by(cond, frac):
-        return [r for r in mstore
-                if r.get("condition") == cond
-                and abs(float(r.get("fraction", 0)) - frac) < 1e-9]
+        return [
+            r
+            for r in mstore
+            if r.get("condition") == cond
+            and abs(float(r.get("fraction", 0)) - frac) < 1e-9
+        ]
 
     surv_src = mstore if mstore else runs
-    surv_fracs = sorted({round(float(r.get("fraction", r.get("adversarial_fraction", 0))), 4)
-                         for r in surv_src})
+    surv_fracs = sorted(
+        {
+            round(float(r.get("fraction", r.get("adversarial_fraction", 0))), 4)
+            for r in surv_src
+        }
+    )
     fig4, ax = plt.subplots(figsize=(6, 4))
     width = 0.35
     xs = list(range(len(surv_fracs)))
@@ -181,11 +197,18 @@ def main() -> int:
         rates = []
         for f in surv_fracs:
             rs = _ms_by(c, f) if mstore else _by(runs, c, f)
-            rates.append(100 * sum(1 for r in rs if r.get("survived")) / len(rs) if rs else 0)
-        ax.bar([x + (i - 0.5) * width for x in xs], rates, width,
-               color=COLORS[c], label=LABELS[c])
+            rates.append(
+                100 * sum(1 for r in rs if r.get("survived")) / len(rs) if rs else 0
+            )
+        ax.bar(
+            [x + (i - 0.5) * width for x in xs],
+            rates,
+            width,
+            color=COLORS[c],
+            label=LABELS[c],
+        )
     ax.set_xticks(xs)
-    ax.set_xticklabels([f"{f*100:.0f}%" for f in surv_fracs])
+    ax.set_xticklabels([f"{f * 100:.0f}%" for f in surv_fracs])
     ax.set_xlabel("adversarial injection")
     ax.set_ylabel("runs survived (%)")
     ax.set_title("Run survival vs injection")
@@ -194,9 +217,63 @@ def main() -> int:
     fig4.tight_layout()
     fig4.savefig(out / "fig_survival.png", dpi=140)
 
-    # --- Combined 2x2 --------------------------------------------------------
-    for fname, fig in [("fig_p3_degradation.png", fig1), ("fig_step_time_stall.png", fig2),
-                       ("fig_guardrail.png", fig3), ("fig_survival.png", fig4)]:
+    # --- Fig 5: mean GPU util vs injection fraction --------------------------
+    # Reads mean_gpu_util from p3_summary.json (aggregate rows) when available;
+    # falls back to computing it from per-run summary.json gpu_util fields.
+    p3_json = sweep / "p3_summary.json"
+    gpu_rows: list[dict] = []
+    if p3_json.exists():
+        try:
+            gpu_rows = json.loads(p3_json.read_text()).get("aggregate", [])
+        except Exception:
+            gpu_rows = []
+
+    # Build per-condition series: fraction → mean_gpu_util (skip None values).
+    fig5_available = False
+    fig5, ax5 = plt.subplots(figsize=(6, 4))
+    for c in CONDITIONS:
+        pts = [
+            (r["fraction"], r["mean_gpu_util"])
+            for r in gpu_rows
+            if r.get("condition") == c and r.get("mean_gpu_util") is not None
+        ]
+        if not pts:
+            # Fall back to per-run summary.json fields.
+            pts = []
+            for f in fracs:
+                vals = [
+                    float(r["mean_gpu_util"])
+                    for r in _by(runs, c, f)
+                    if r.get("mean_gpu_util") is not None
+                ]
+                if vals:
+                    pts.append((f, sum(vals) / len(vals)))
+        if pts:
+            fig5_available = True
+            xs_g = [p[0] * 100 for p in pts]
+            ys_g = [p[1] for p in pts]
+            ax5.plot(xs_g, ys_g, "o-", color=COLORS[c], label=LABELS[c], lw=2)
+    if fig5_available:
+        ax5.set_xlabel("adversarial injection (%)")
+        ax5.set_ylabel("mean GPU utilisation (%)")
+        ax5.set_title("GPU idle effect: in-loop adversarial code starves the GPU")
+        ax5.set_ylim(-5, 105)
+        ax5.legend()
+        ax5.grid(alpha=0.3)
+        fig5.tight_layout()
+        fig5.savefig(out / "fig_gpu_util.png", dpi=140)
+        print("wrote", out / "fig_gpu_util.png")
+    else:
+        print("fig_gpu_util: no mean_gpu_util data available — skipping")
+        plt.close(fig5)
+
+    # --- Summary print -------------------------------------------------------
+    for fname, fig in [
+        ("fig_p3_degradation.png", fig1),
+        ("fig_step_time_stall.png", fig2),
+        ("fig_guardrail.png", fig3),
+        ("fig_survival.png", fig4),
+    ]:
         print("wrote", out / fname)
     print(f"\nFigures written to {out}")
     return 0

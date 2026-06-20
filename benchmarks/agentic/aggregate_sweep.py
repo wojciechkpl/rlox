@@ -7,10 +7,18 @@ sweep launcher so re-aggregation needs no GPU.
 
 Public API
 ----------
-aggregate(runs_dir) -> tuple[list[dict], dict]
+aggregate(runs_dir, metric_store_dir=None) -> tuple[list[dict], dict]
     Parse all summary.json files under ``runs_dir`` and return:
-      - rows: per-(condition, fraction) aggregate stats including reward fields
-      - verdict: p3_verdict dict including guardrail block
+      - rows: per-(condition, fraction) aggregate stats including reward fields,
+              and now ``mean_gpu_util`` (float or None).
+      - verdict: p3_verdict dict including guardrail block.
+
+    **DNF-aware survival** (Change 3): when ``metric_store_dir`` is provided,
+    survival counts are read from the authoritative metric_store/*.json files
+    (written by run_sweep for ALL grid points, including runs that timed out or
+    crashed before writing summary.json).  Reward/elapsed/gpu_util stats are
+    still read from summary.json (completed runs only).  This prevents
+    over-counting survival for runs that DNF'd.
 
 main() -> int
     CLI entry point: reads from the default sweep output dir and writes
@@ -46,7 +54,27 @@ _GUARDRAIL_ABS_TOL: float = 0.15
 # ---------------------------------------------------------------------------
 
 
-def aggregate(runs_dir: Path | str) -> tuple[list[dict], dict]:
+def _load_metric_store(metric_store_dir: Path) -> list[dict]:
+    """Load all per-run JSON artifacts from the metric_store directory.
+
+    The metric_store is written by ``run_sweep`` for EVERY grid point,
+    including DNF/timeout runs that never produced a ``summary.json``.
+    Each artifact has at minimum: ``condition``, ``seed``, ``fraction``,
+    ``survived``.
+    """
+    recs: list[dict] = []
+    for mf in sorted(metric_store_dir.glob("*.json")):
+        try:
+            recs.append(json.loads(mf.read_text()))
+        except Exception:
+            continue
+    return recs
+
+
+def aggregate(
+    runs_dir: Path | str,
+    metric_store_dir: Path | str | None = None,
+) -> tuple[list[dict], dict]:
     """Aggregate per-run summary.json files into rows + p3_verdict.
 
     Parameters
@@ -54,6 +82,12 @@ def aggregate(runs_dir: Path | str) -> tuple[list[dict], dict]:
     runs_dir:
         Directory containing one sub-directory per run, each with a
         ``summary.json`` produced by ``trl_grpo_run.train()``.
+    metric_store_dir:
+        Optional path to the metric_store directory written by ``run_sweep``.
+        When provided, survival counts come from the authoritative metric_store
+        records (covers DNF/timeout runs that never wrote summary.json).  If
+        omitted or the directory does not exist, survival is counted from
+        summary.json files only (pre-Change-3 behaviour, matches existing tests).
 
     Returns
     -------
@@ -62,14 +96,14 @@ def aggregate(runs_dir: Path | str) -> tuple[list[dict], dict]:
                   fields: condition, fraction, n, survived,
                   mean_elapsed_secs, mean_completed_steps,
                   mean_reward_last (compat alias),
-                  mean_final_reward, mean_reward.
+                  mean_final_reward, mean_reward, mean_gpu_util.
         verdict — dict: p3_verdict with treatment_survives_all_fractions,
                   per-fraction survival/timing, and a ``guardrail`` block.
     """
     runs_dir = Path(runs_dir)
 
     # ------------------------------------------------------------------
-    # Load all summary.json files
+    # Load all summary.json files  (reward / elapsed / gpu_util source)
     # ------------------------------------------------------------------
     runs: list[dict] = []
     for sj in sorted(runs_dir.glob("*/summary.json")):
@@ -86,7 +120,26 @@ def aggregate(runs_dir: Path | str) -> tuple[list[dict], dict]:
         }
 
     # ------------------------------------------------------------------
-    # Group by (condition, fraction)
+    # Load metric_store for authoritative survival counts (DNF-aware).
+    # Falls back to summary.json-based survival when metric_store is absent.
+    # ------------------------------------------------------------------
+    metric_recs: list[dict] = []
+    if metric_store_dir is not None:
+        _ms_path = Path(metric_store_dir)
+        if _ms_path.is_dir():
+            metric_recs = _load_metric_store(_ms_path)
+
+    # Build authoritative survival lookup keyed by (condition, seed, fraction).
+    # When metric_store is available we use it; otherwise fall back to summary.
+    _survival_from_store: dict[tuple[str, int, float], bool] = {}
+    for rec in metric_recs:
+        cond = rec.get("condition", "unknown")
+        seed = int(rec.get("seed", -1))
+        frac = float(rec.get("fraction", 0.0))
+        _survival_from_store[(cond, seed, frac)] = bool(rec.get("survived", False))
+
+    # ------------------------------------------------------------------
+    # Group summary.json runs by (condition, fraction)
     # ------------------------------------------------------------------
     agg: dict[tuple[str, float], list[dict]] = {}
     for r in runs:
@@ -95,44 +148,108 @@ def aggregate(runs_dir: Path | str) -> tuple[list[dict], dict]:
         agg.setdefault((cond, frac), []).append(r)
 
     # ------------------------------------------------------------------
+    # Build the complete set of (condition, fraction) keys.
+    # When the metric_store is available, its keys are authoritative (they
+    # include DNF runs that may not have a summary.json).  When not available,
+    # only keys from summary.json runs are present.
+    # ------------------------------------------------------------------
+    all_keys: set[tuple[str, float]] = set(agg.keys())
+    if metric_recs:
+        for rec in metric_recs:
+            cond = rec.get("condition", "unknown")
+            frac = float(rec.get("fraction", 0.0))
+            all_keys.add((cond, frac))
+
+    # ------------------------------------------------------------------
     # Build per-group rows
     # ------------------------------------------------------------------
     rows: list[dict] = []
-    for (cond, frac), rs in sorted(agg.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-        n = len(rs)
+    for cond, frac in sorted(all_keys, key=lambda kv: (kv[0], kv[1])):
+        rs = agg.get((cond, frac), [])  # completed runs with summary.json
+        n_completed = len(rs)
+
+        # Survival: prefer metric_store (covers DNF); fall back to summary.
+        if _survival_from_store:
+            # Count survival from metric_store records for this (cond, frac).
+            survived_count = sum(
+                1
+                for (c, s, f), sv in _survival_from_store.items()
+                if c == cond and abs(f - frac) < 1e-9 and sv
+            )
+            n_total = sum(
+                1
+                for (c, s, f) in _survival_from_store
+                if c == cond and abs(f - frac) < 1e-9
+            )
+        else:
+            survived_count = sum(1 for x in rs if x.get("survived"))
+            n_total = n_completed
+
+        if n_completed == 0:
+            # DNF run(s) with no summary.json — fill with nulls for metrics.
+            rows.append(
+                {
+                    "condition": cond,
+                    "fraction": frac,
+                    "n": n_total,
+                    "survived": survived_count,
+                    "mean_elapsed_secs": None,
+                    "mean_completed_steps": None,
+                    "mean_final_reward": None,
+                    "mean_reward": None,
+                    "mean_reward_last": None,
+                    "mean_gpu_util": None,
+                }
+            )
+            continue
+
         mean_final = (
             sum(
                 float(x.get("final_reward", x.get("mean_reward_last", 0.0))) for x in rs
             )
-            / n
+            / n_completed
         )
         mean_rwd = (
             sum(float(x.get("mean_reward", x.get("mean_reward_last", 0.0))) for x in rs)
-            / n
+            / n_completed
         )
+
+        # mean_gpu_util: average over runs that have a non-None value.
+        gpu_vals = [
+            float(x["mean_gpu_util"]) for x in rs if x.get("mean_gpu_util") is not None
+        ]
+        mean_gpu = round(sum(gpu_vals) / len(gpu_vals), 2) if gpu_vals else None
+
         rows.append(
             {
                 "condition": cond,
                 "fraction": frac,
-                "n": n,
-                "survived": sum(1 for x in rs if x.get("survived")),
+                "n": n_total,
+                "survived": survived_count,
                 "mean_elapsed_secs": round(
-                    sum(float(x.get("elapsed_secs", 0)) for x in rs) / n, 1
+                    sum(float(x.get("elapsed_secs", 0)) for x in rs) / n_completed, 1
                 ),
                 "mean_completed_steps": round(
-                    sum(int(x.get("completed_steps", 0)) for x in rs) / n, 2
+                    sum(int(x.get("completed_steps", 0)) for x in rs) / n_completed, 2
                 ),
-                # Reward fields — new
+                # Reward fields
                 "mean_final_reward": round(mean_final, 4),
                 "mean_reward": round(mean_rwd, 4),
                 # Backward-compat alias
                 "mean_reward_last": round(mean_final, 3),
+                # GPU-utilisation (None when no GPU or sampler unavailable)
+                "mean_gpu_util": mean_gpu,
             }
         )
 
     def _row(cond: str, frac: float) -> dict | None:
         return next(
-            (x for x in rows if x["condition"] == cond and x["fraction"] == frac), None
+            (
+                x
+                for x in rows
+                if x["condition"] == cond and abs(x["fraction"] - frac) < 1e-9
+            ),
+            None,
         )
 
     # ------------------------------------------------------------------
@@ -150,14 +267,17 @@ def aggregate(runs_dir: Path | str) -> tuple[list[dict], dict]:
     for frac in (0.05, 0.10):
         b, t = _row("in_loop", frac), _row("rlox", frac)
         if b and t and base0:
+            b_elapsed = b.get("mean_elapsed_secs") or 0.0
+            t_elapsed = t.get("mean_elapsed_secs") or 0.0
+            base0_elapsed = base0.get("mean_elapsed_secs") or 0.0
             verdict[f"frac_{frac}"] = {
                 "baseline_survived": f"{b['survived']}/{b['n']}",
                 "treatment_survived": f"{t['survived']}/{t['n']}",
                 "baseline_elapsed_x_vs_clean_baseline": round(
-                    b["mean_elapsed_secs"] / max(base0["mean_elapsed_secs"], 1e-9), 2
+                    b_elapsed / max(base0_elapsed, 1e-9), 2
                 ),
                 "baseline_slower_than_treatment_x": round(
-                    b["mean_elapsed_secs"] / max(t["mean_elapsed_secs"], 1e-9), 2
+                    b_elapsed / max(t_elapsed, 1e-9), 2
                 ),
             }
 
@@ -285,7 +405,11 @@ def _compute_guardrail(
 
 
 def main() -> int:
-    rows, verdict = aggregate(OUT / "runs")
+    metric_store = OUT / "metric_store"
+    rows, verdict = aggregate(
+        OUT / "runs",
+        metric_store_dir=metric_store if metric_store.is_dir() else None,
+    )
 
     if not rows:
         print("no summaries found under", OUT / "runs")
@@ -301,24 +425,29 @@ def main() -> int:
     }
     (OUT / "p3_summary.json").write_text(json.dumps(summary, indent=2))
 
-    # Write Markdown table (extended with reward columns)
+    def _fmt(val: object) -> str:
+        """Format a possibly-None numeric cell for Markdown."""
+        return str(val) if val is not None else "n/a"
+
+    # Write Markdown table (extended with reward + GPU-util columns)
     md = [
         "# rlox benchmark — P3 sweep result",
         "",
         f"{n_runs} runs (2 conditions x seeds x fractions), Qwen3-4B-Instruct-2507 + LoRA, "
-        "6 GRPO steps each, single RTX 5090.",
+        "60 GRPO steps each, single RTX 5090.",
         "",
         "P3 = adversarial-code containment. **Treatment** = rlox sandbox (`/verify`, out-of-process). "
         "**Baseline** = in-process `in_loop` exec (scope-bounded for host safety).",
         "",
-        "| condition | injection | survived | mean steps | mean final reward | mean reward | mean elapsed (s) |",
-        "|---|---|---|---|---|---|---|",
+        "| condition | injection | survived | mean steps | mean final reward | mean reward | mean elapsed (s) | mean GPU util (%) |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for x in rows:
         md.append(
             f"| {x['condition']} | {x['fraction']:.2f} | {x['survived']}/{x['n']} | "
-            f"{x['mean_completed_steps']} | {x['mean_final_reward']} | "
-            f"{x['mean_reward']} | {x['mean_elapsed_secs']} |"
+            f"{_fmt(x.get('mean_completed_steps'))} | {_fmt(x.get('mean_final_reward'))} | "
+            f"{_fmt(x.get('mean_reward'))} | {_fmt(x.get('mean_elapsed_secs'))} | "
+            f"{_fmt(x.get('mean_gpu_util'))} |"
         )
     md += ["", "## P3 verdict", "```json", json.dumps(verdict, indent=2), "```"]
     (OUT / "p3_summary.md").write_text("\n".join(md) + "\n")
@@ -329,10 +458,11 @@ def main() -> int:
         print(
             f"  {x['condition']:8s} frac={x['fraction']:.2f}  "
             f"survived={x['survived']}/{x['n']}  "
-            f"steps={x['mean_completed_steps']}  "
-            f"final_reward={x['mean_final_reward']}  "
-            f"mean_reward={x['mean_reward']}  "
-            f"elapsed={x['mean_elapsed_secs']}s"
+            f"steps={_fmt(x.get('mean_completed_steps'))}  "
+            f"final_reward={_fmt(x.get('mean_final_reward'))}  "
+            f"mean_reward={_fmt(x.get('mean_reward'))}  "
+            f"elapsed={_fmt(x.get('mean_elapsed_secs'))}s  "
+            f"gpu_util={_fmt(x.get('mean_gpu_util'))}%"
         )
     print("verdict:", json.dumps(verdict))
     g = verdict.get("guardrail", {})
