@@ -59,6 +59,8 @@ struct AppState {
     /// in-flight requests.  Each sandbox slot is acquired before spawning a
     /// completion into the JoinSet and released when that task completes.
     sandbox_semaphore: Semaphore,
+    /// Wall-clock timeout applied to each `/verify` sandbox run.
+    verify_timeout_secs: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -652,7 +654,7 @@ async fn post_verify(
 
         let job_id = Uuid::new_v4();
         let sandbox_cfg = SandboxConfig {
-            timeout_secs: VERIFY_DEFAULT_TIMEOUT_SECS,
+            timeout_secs: state.verify_timeout_secs,
             mem_limit_bytes: state.config.sandbox.mem_limit_bytes,
             pids_limit: state.config.sandbox.pids_limit,
             cpu_weight: state.config.sandbox.cpu_weight,
@@ -801,6 +803,7 @@ pub fn router() -> Router {
 /// Build the axum `Router` with an explicit `ServerConfig`.
 ///
 /// Used by tests to inject a mock vLLM URL and custom sandbox limits.
+/// Uses `DEFAULT_MAX_CONCURRENT_SANDBOXES` and `VERIFY_DEFAULT_TIMEOUT_SECS`.
 ///
 /// ## Startup validation (Linux only)
 ///
@@ -813,6 +816,32 @@ pub fn router() -> Router {
 /// systemd-run --user --scope --slice=rlox.slice ./rlox-server
 /// ```
 pub fn router_with_config(config: ServerConfig) -> Router {
+    router_with_full_config(
+        config,
+        DEFAULT_MAX_CONCURRENT_SANDBOXES,
+        VERIFY_DEFAULT_TIMEOUT_SECS,
+    )
+}
+
+/// Build the axum `Router` with an explicit `ServerConfig` and additional
+/// runtime parameters not exposed on `ServerConfig` itself.
+///
+/// Used by the `rlox-verify-server` binary to wire CLI arguments through to
+/// the router without changing `ServerConfig`'s struct layout (which is used
+/// directly in tests via struct-literal construction).
+///
+/// - `max_concurrent` — maximum number of sandbox workers running concurrently
+///   across all in-flight requests.
+/// - `verify_timeout_secs` — wall-clock timeout applied to each `/verify` run.
+///
+/// ## Startup validation (Linux only)
+///
+/// Same cgroup validation as `router_with_config`.
+pub fn router_with_full_config(
+    config: ServerConfig,
+    max_concurrent: usize,
+    verify_timeout_secs: f64,
+) -> Router {
     // ── Startup cgroup validation (Linux only) ───────────────────────────────
     #[cfg(target_os = "linux")]
     {
@@ -838,7 +867,8 @@ pub fn router_with_config(config: ServerConfig) -> Router {
     let state = Arc::new(AppState {
         config,
         http_client,
-        sandbox_semaphore: Semaphore::new(DEFAULT_MAX_CONCURRENT_SANDBOXES),
+        sandbox_semaphore: Semaphore::new(max_concurrent),
+        verify_timeout_secs,
     });
 
     Router::new()

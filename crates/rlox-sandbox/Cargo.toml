@@ -10,6 +10,10 @@ categories.workspace = true
 
 # This crate targets Linux only.  It will not compile on macOS/Windows.
 
+[[bin]]
+name = "rlox-verify-server"
+path = "src/bin/rlox_verify_server.rs"
+
 [dependencies]
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
