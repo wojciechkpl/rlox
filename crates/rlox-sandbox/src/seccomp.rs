@@ -165,10 +165,8 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_pselect6,
         libc::SYS_poll,
         libc::SYS_ppoll,
-        libc::SYS_inotify_init,
-        libc::SYS_inotify_init1,
-        libc::SYS_inotify_add_watch,
-        libc::SYS_inotify_rm_watch,
+        // inotify syscalls omitted — not needed by CPython unit tests; defense-in-depth
+        // against cross-job filesystem enumeration (F9).
         // --- time ---
         libc::SYS_clock_gettime,
         libc::SYS_clock_getres,

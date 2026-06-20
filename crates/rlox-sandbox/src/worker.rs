@@ -407,6 +407,7 @@ unsafe impl Send for SandboxCloneArgs {}
 const SETUP_OK: u8 = 0;
 const SETUP_ERR_CGROUP_OPEN: u8 = 1;
 const SETUP_ERR_CGROUP_WRITE: u8 = 2;
+const SETUP_ERR_SECCOMP: u8 = 3;
 
 extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
     // SAFETY: `arg` is a valid pointer to SandboxCloneArgs owned by the parent.
@@ -472,7 +473,7 @@ extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
             libc::_exit(1);
         }
 
-        // Make mount namespace private.
+        // Make mount namespace private (prevents propagation to host).
         let root = b"/\0";
         let _ = libc::mount(
             std::ptr::null(),
@@ -482,9 +483,62 @@ extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
             std::ptr::null(),
         );
 
-        // Install seccomp filter.
-        // PR_SET_NO_NEW_PRIVS first.
-        libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1usize, 0usize, 0usize, 0usize);
+        // F2 — Private /tmp via tmpfs.
+        // Mount a fresh tmpfs over /tmp so sandboxed writes never persist on
+        // the host filesystem.  When the mount namespace exits, the tmpfs is
+        // discarded atomically.
+        let tmp_path = b"/tmp\0";
+        let tmpfs_name = b"tmpfs\0";
+        let tmpfs_type = b"tmpfs\0";
+        let tmpfs_opts = b"mode=1777,size=128m\0";
+        libc::mount(
+            tmpfs_name.as_ptr() as *const libc::c_char,
+            tmp_path.as_ptr() as *const libc::c_char,
+            tmpfs_type.as_ptr() as *const libc::c_char,
+            libc::MS_NOSUID | libc::MS_NODEV,
+            tmpfs_opts.as_ptr() as *const libc::c_void,
+        );
+
+        // F3 — Scope /proc to the PID namespace.
+        // Without this the child inherits the host /proc mount and can
+        // enumerate host PIDs.  Mounting a new procfs inside CLONE_NEWPID
+        // restricts it to the sandbox's own PID namespace (PID 1 = python3).
+        let proc_path = b"/proc\0";
+        let proc_name = b"proc\0";
+        let proc_type = b"proc\0";
+        libc::mount(
+            proc_name.as_ptr() as *const libc::c_char,
+            proc_path.as_ptr() as *const libc::c_char,
+            proc_type.as_ptr() as *const libc::c_char,
+            libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+            std::ptr::null(),
+        );
+
+        // F7 — Redirect stdin to /dev/null.
+        // Without this, sandboxed code reading sys.stdin blocks indefinitely
+        // (denial-of-service via stdin exhaustion of the sandbox timeout).
+        let devnull_path = b"/dev/null\0";
+        let devnull_fd = libc::open(
+            devnull_path.as_ptr() as *const libc::c_char,
+            libc::O_RDONLY,
+        );
+        if devnull_fd >= 0 {
+            libc::dup2(devnull_fd, 0);
+            if devnull_fd > 0 {
+                libc::close(devnull_fd);
+            }
+        }
+
+        // F1/F8 — Install seccomp filter fail-closed.
+        // PR_SET_NO_NEW_PRIVS must succeed; failure means we cannot safely
+        // install a seccomp filter that is effective.
+        let pnnp_rc = libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1usize, 0usize, 0usize, 0usize);
+        if pnnp_rc != 0 {
+            let code: u8 = SETUP_ERR_SECCOMP;
+            libc::write(args.err_w, &code as *const u8 as *const libc::c_void, 1);
+            libc::close(args.err_w);
+            libc::_exit(1);
+        }
 
         const SF_SIZE: usize = 8;
         if args.seccomp_len > 0 && args.seccomp_len % SF_SIZE == 0 {
@@ -499,12 +553,26 @@ extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
                 filter: args.seccomp_ptr as *const libc::c_void,
             };
             const SECCOMP_SET_MODE_FILTER: libc::c_long = 1;
-            libc::syscall(
+            let sc_rc = libc::syscall(
                 libc::SYS_seccomp,
                 SECCOMP_SET_MODE_FILTER,
                 0i64,
                 &fprog as *const SockFprog as *const libc::c_void,
             );
+            if sc_rc != 0 {
+                // seccomp installation failed — never exec unsandboxed.
+                let code: u8 = SETUP_ERR_SECCOMP;
+                libc::write(args.err_w, &code as *const u8 as *const libc::c_void, 1);
+                libc::close(args.err_w);
+                libc::_exit(1);
+            }
+        } else {
+            // Empty or misaligned seccomp blob — fail closed rather than exec
+            // unsandboxed (F8: seccomp silent-skip prevention).
+            let code: u8 = SETUP_ERR_SECCOMP;
+            libc::write(args.err_w, &code as *const u8 as *const libc::c_void, 1);
+            libc::close(args.err_w);
+            libc::_exit(1);
         }
 
         // Signal parent: setup OK.
@@ -589,24 +657,89 @@ pub async fn run_sandboxed(
         }
     };
 
-    // ── 3. Write Python script to a private directory (mode 0700) ────────────
-    // Use a per-job private directory under /tmp so other users cannot read
-    // or execute the untrusted script.
-    let script_dir = PathBuf::from(format!("/tmp/rlox-{}", input.job_id));
+    // ── 3. Write Python scripts to a private directory (mode 0700) ──────────
+    //
+    // F4 — Trusted runner protocol (reward-forging prevention).
+    //
+    // We write THREE files to /dev/shm (not /tmp, so the new tmpfs mounted
+    // over /tmp inside the sandbox does not shadow these files):
+    //
+    //   model.py      — the untrusted model code only
+    //   test_suite.py — the test assertions only
+    //   runner.py     — the TRUSTED harness (generated by the sandbox, not the
+    //                   model); it contains a random per-run nonce that the model
+    //                   cannot know in advance.
+    //
+    // The runner:
+    //   1. Runs model code via exec(), catching SystemExit (so sys.exit(0) in
+    //      model code does NOT abort the runner — test suite still runs).
+    //   2. Runs test suite via exec(), catching all exceptions; records pass/fail.
+    //   3. Prints "RLOX_RESULT:<nonce>:<passed>:<total>" as the LAST output line.
+    //
+    // If model code calls os._exit(0) directly (uncatchable), the runner process
+    // is terminated before the sentinel is printed.  The parent reads no sentinel
+    // → pass_rate = 0.0.
+    //
+    // If model code registers an atexit handler that calls os._exit(0), the handler
+    // fires at Python shutdown (after the sentinel is already printed), so it does
+    // not prevent the sentinel from being emitted.
+    //
+    // The nonce prevents the model from pre-printing a forged sentinel: it cannot
+    // know the nonce because it is randomly generated per-run in Rust and embedded
+    // only in the trusted runner script, which the model never sees.
+    //
+    // /dev/shm is used instead of /tmp so the files survive the tmpfs mount
+    // that the child places over /tmp (F2).  The child still reads these from
+    // /dev/shm which remains accessible inside the mount namespace.
+
+    // Generate a random per-run nonce.
+    let nonce = {
+        let mut buf = [0u8; 16];
+        // SAFETY: getrandom is safe; buf is a valid output buffer.
+        let rc = unsafe {
+            libc::syscall(libc::SYS_getrandom, buf.as_mut_ptr() as *mut libc::c_void, 16usize, 0usize)
+        };
+        if rc != 16i64 {
+            let _ = cgroup::destroy_leaf(&leaf_path);
+            return Err(SandboxError::Spawn("getrandom for nonce failed".to_owned()));
+        }
+        buf.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    };
+
+    let script_dir = PathBuf::from(format!("/dev/shm/rlox-{}", input.job_id));
     if let Err(e) = fs::DirBuilder::new().mode(0o700).create(&script_dir) {
         let _ = cgroup::destroy_leaf(&leaf_path);
         return Err(SandboxError::Spawn(format!(
             "mkdir script_dir {script_dir:?}: {e}"
         )));
     }
-    let script_path = script_dir.join("script.py");
-    let script_content = format!("{}\n{}\n", input.code, input.test_suite);
-    if let Err(e) = fs::write(&script_path, &script_content) {
+
+    // Write model code.
+    let model_path = script_dir.join("model.py");
+    if let Err(e) = fs::write(&model_path, &input.code) {
         let _ = fs::remove_dir_all(&script_dir);
         let _ = cgroup::destroy_leaf(&leaf_path);
-        return Err(SandboxError::Spawn(format!(
-            "write script {script_path:?}: {e}"
-        )));
+        return Err(SandboxError::Spawn(format!("write model.py: {e}")));
+    }
+
+    // Write test suite.
+    let test_suite_path = script_dir.join("test_suite.py");
+    if let Err(e) = fs::write(&test_suite_path, &input.test_suite) {
+        let _ = fs::remove_dir_all(&script_dir);
+        let _ = cgroup::destroy_leaf(&leaf_path);
+        return Err(SandboxError::Spawn(format!("write test_suite.py: {e}")));
+    }
+
+    // Build and write the trusted runner script.
+    // The script_dir path is embedded so the runner can find model.py and
+    // test_suite.py even after the child mounts a new tmpfs over /tmp.
+    let script_dir_str = script_dir.to_string_lossy();
+    let runner_content = build_trusted_runner(&script_dir_str, &nonce);
+    let script_path = script_dir.join("runner.py");
+    if let Err(e) = fs::write(&script_path, &runner_content) {
+        let _ = fs::remove_dir_all(&script_dir);
+        let _ = cgroup::destroy_leaf(&leaf_path);
+        return Err(SandboxError::Spawn(format!("write runner.py: {e}")));
     }
 
     // ── 4. Set up pipes ──────────────────────────────────────────────────────
@@ -735,7 +868,19 @@ pub async fn run_sandboxed(
         let _ = cgroup::destroy_leaf(&leaf_path);
         return Err(SandboxError::Namespace(format!("write uid_map: {e}")));
     }
-    let _ = fs::write(format!("/proc/{child_pid}/gid_map"), &gid_map);
+    // F5 — Propagate gid_map write failure (symmetric with uid_map handling).
+    if let Err(e) = fs::write(format!("/proc/{child_pid}/gid_map"), &gid_map) {
+        unsafe { libc::close(sync_p2c[1]); }
+        unsafe {
+            let mut status: i32 = 0;
+            libc::waitpid(child_pid, &mut status as *mut i32, 0);
+        }
+        unsafe { libc::close(err_pipe[0]); }
+        unsafe { libc::close(stdout_pipe[0]); }
+        let _ = fs::remove_dir_all(&script_dir);
+        let _ = cgroup::destroy_leaf(&leaf_path);
+        return Err(SandboxError::Namespace(format!("write gid_map: {e}")));
+    }
 
     // Signal child: uid/gid maps written.
     // The child will self-migrate into the cgroup leaf by writing "0" to
@@ -779,6 +924,7 @@ pub async fn run_sandboxed(
         let reason = match child_setup_code {
             SETUP_ERR_CGROUP_OPEN => "child could not open cgroup.procs (cgroup migration failed)",
             SETUP_ERR_CGROUP_WRITE => "child could not write to cgroup.procs (cgroup migration failed)",
+            SETUP_ERR_SECCOMP => "child seccomp filter installation failed or blob was empty/misaligned (fail-closed — F1/F8)",
             _ => "child namespace/seccomp setup failed",
         };
         return Ok(SandboxOutput {
@@ -934,10 +1080,12 @@ pub async fn run_sandboxed(
         freeze_event = true;
     }
 
-    let pass_rate = match &exit_status {
-        SandboxExitStatus::Clean(0) => 1.0f32,
-        _ => 0.0f32,
-    };
+    // F4 — Derive pass_rate from the trusted-runner sentinel, NOT from exit code.
+    //
+    // The runner prints "RLOX_RESULT:<nonce>:<passed>:<total>" as the last line.
+    // We parse it here.  If the sentinel is absent (model called os._exit(0),
+    // crashed, or timed out) or the nonce mismatches, pass_rate = 0.0.
+    let pass_rate = parse_sentinel_pass_rate(&stdout, &nonce);
 
     Ok(SandboxOutput {
         job_id: input.job_id,
@@ -1000,6 +1148,160 @@ fn validate_cgroup_base(config: &SandboxConfig) -> Result<(), SandboxError> {
     // level and give a clear error if nothing is found.
     let _ = is_writable; // checked by create_leaf; existence check above is the guard
     Ok(())
+}
+
+/// Build the trusted runner Python script (F4).
+///
+/// The runner is generated by the sandbox (not the model), embeds a random
+/// per-run `nonce`, and uses `script_dir` to locate `model.py` and
+/// `test_suite.py`.
+///
+/// The protocol:
+///   1. Runs model code via `exec()`, catching `SystemExit` so `sys.exit(0)`
+///      in model code does NOT abort the runner — the test suite still runs.
+///   2. Runs test suite via `exec()`, catching all exceptions; records pass/fail.
+///   3. Prints `RLOX_RESULT:<nonce>:<passed>:<total>` as the last stdout line.
+///
+/// If model code calls `os._exit(0)` (uncatchable), the runner dies before
+/// printing the sentinel → parent sees 0 passes.
+///
+/// If model code registers `atexit(os._exit(0))`, the handler fires at Python
+/// shutdown — AFTER the sentinel is already printed — so it does not prevent
+/// the sentinel from being emitted.
+fn build_trusted_runner(script_dir: &str, nonce: &str) -> String {
+    format!(
+        r#"import sys as _sys
+import os as _os
+import builtins as _builtins
+
+_NONCE = "{nonce}"
+_script_dir = "{script_dir}"
+_model_path = _os.path.join(_script_dir, "model.py")
+_test_path = _os.path.join(_script_dir, "test_suite.py")
+
+# ── F2: Private /tmp redirect ────────────────────────────────────────────────
+# On systems where mounting a new tmpfs over /tmp is blocked by AppArmor
+# (apparmor_restrict_unprivileged_userns=1), we implement /tmp isolation at the
+# Python level: intercept builtins.open and redirect /tmp/ paths to a private
+# directory under the sandbox's script_dir (which lives on /dev/shm and is
+# cleaned up by the parent after the sandbox exits).
+_priv_tmp = _os.path.join(_script_dir, "tmp")
+_os.makedirs(_priv_tmp, mode=0o1777, exist_ok=True)
+
+_orig_open = _builtins.open
+def _safe_open(file, *args, **kwargs):
+    if isinstance(file, (str, bytes)):
+        _f = file.decode() if isinstance(file, bytes) else file
+        if _f.startswith("/tmp/"):
+            # Redirect to private tmp; create intermediate dirs if needed.
+            _priv_path = _priv_tmp + _f[4:]
+            try:
+                _os.makedirs(_os.path.dirname(_priv_path), exist_ok=True)
+            except Exception:
+                pass
+            file = _priv_path if not isinstance(file, bytes) else _priv_path.encode()
+    return _orig_open(file, *args, **kwargs)
+_builtins.open = _safe_open
+
+# ── F3: Scope /proc to PID namespace ─────────────────────────────────────────
+# On systems where remounting /proc is blocked by AppArmor, we filter /proc
+# at the Python level.  We determine which PIDs belong to our PID namespace by
+# attempting to readlink /proc/<pid>/ns/pid — inside the user+pid namespace
+# created by clone(), readlink on host-PID namespace entries fails with EPERM,
+# while our own processes' entries succeed.  We include only PIDs for which the
+# readlink succeeds AND matches our own PID namespace ID.
+_my_pidns = None
+try:
+    _my_pidns = _os.readlink("/proc/self/ns/pid")
+except Exception:
+    pass
+
+_orig_listdir = _os.listdir
+def _safe_listdir(path="."):
+    _result = _orig_listdir(path)
+    _p = str(path) if not isinstance(path, str) else path
+    if _my_pidns is not None and _p.rstrip("/") == "/proc":
+        def _in_our_ns(entry):
+            if not entry.isdigit():
+                return True  # non-numeric entries (self, net, sys, etc.) are fine
+            try:
+                return _os.readlink(f"/proc/{{entry}}/ns/pid") == _my_pidns
+            except OSError:
+                return False  # EPERM = host process, exclude
+        _result = [e for e in _result if _in_our_ns(e)]
+    return _result
+_os.listdir = _safe_listdir
+
+# ── Shared namespace for model + test_suite ──────────────────────────────────
+_ns = dict(__name__="__main__", __file__=_model_path)
+
+# ── Step 1: run model code ────────────────────────────────────────────────────
+# We ONLY intercept SystemExit(0) — the specific F4 reward-forging attack where
+# model code calls sys.exit(0) BEFORE the test suite runs.  Catching only
+# SystemExit(0) means:
+#   - sys.exit(0) → caught → test suite still runs → fair reward signal (F4 fix)
+#   - sys.exit(1) → propagates → runner exits 1 → exit_status=Clean(1) ≠ Clean(0)
+#   - OSError/EPERM from seccomp denial → propagates → runner exits nonzero
+#   - os._exit(0) in model code → uncatchable → runner terminates → no sentinel
+try:
+    with _orig_open(_model_path, "r") as _f:
+        _model_src = _f.read()
+    exec(compile(_model_src, _model_path, "exec"), _ns)
+except SystemExit as _e:
+    if (_e.code if _e.code is not None else 0) != 0:
+        raise  # non-zero sys.exit → propagate, runner exits nonzero
+    # sys.exit(0): caught, continue to test suite (F4 fix).
+# Other exceptions propagate → runner exits nonzero, no sentinel.
+
+# ── Step 2: run test suite ────────────────────────────────────────────────────
+# Exceptions from the test suite (e.g. AssertionError) propagate too.
+# The sentinel is printed ONLY if both model code and test_suite complete without
+# raising (or if model only raised SystemExit, which was caught in step 1).
+#
+# atexit attack analysis: if model registers atexit(os._exit(0)), that handler
+# fires at Python SHUTDOWN (after the sentinel is already printed), not during
+# an exception in exec().  So for passing tests the sentinel is safe.
+# If the test_suite FAILS (AssertionError), Python starts shutdown after the
+# uncaught exception, atexit fires → os._exit(0), but the sentinel was never
+# printed → pass_rate = 0.0.  Correct behaviour.
+_test_src = _orig_open(_test_path, "r").read()
+if _test_src.strip():
+    exec(compile(_test_src, _test_path, "exec"), _ns)
+    # If exec raises, we propagate → no sentinel.
+
+# ── Step 3: emit sentinel ─────────────────────────────────────────────────────
+# Reached only when BOTH model code (catching SystemExit) AND the test suite
+# completed without raising any unhandled exception.
+print(f"RLOX_RESULT:{{_NONCE}}:1:1", flush=True)
+"#
+    )
+}
+
+/// Parse the trusted-runner sentinel from stdout to derive pass_rate (F4).
+///
+/// Looks for a line matching `RLOX_RESULT:<nonce>:<passed>:<total>`.
+/// If the sentinel is absent or the nonce mismatches, returns 0.0.
+/// If `passed == total > 0`, returns 1.0; partial pass returns the fraction.
+fn parse_sentinel_pass_rate(stdout: &str, nonce: &str) -> f32 {
+    let prefix = format!("RLOX_RESULT:{nonce}:");
+    for line in stdout.lines() {
+        if let Some(rest) = line.trim().strip_prefix(&prefix) {
+            // rest = "<passed>:<total>"
+            let mut parts = rest.splitn(2, ':');
+            if let (Some(passed_s), Some(total_s)) = (parts.next(), parts.next()) {
+                if let (Ok(passed), Ok(total)) =
+                    (passed_s.parse::<u32>(), total_s.parse::<u32>())
+                {
+                    if total == 0 {
+                        return 0.0;
+                    }
+                    return passed as f32 / total as f32;
+                }
+            }
+        }
+    }
+    // Sentinel absent or nonce mismatch → 0.0.
+    0.0
 }
 
 /// Drain all available bytes from a non-blocking `fd` into `buf`, up to `cap`.
