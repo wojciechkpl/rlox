@@ -7,6 +7,7 @@ name = "rlox"
 version = "1.2.0"
 requires-python = ">=3.10"
 license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-APACHE", "LICENSE-MIT"]
 description = "Rust-accelerated reinforcement learning — 142x faster GAE, 53x faster rollouts. The Polars of RL."
 readme = "README.md"
 authors = [{name = "Wojciech Kowalinski"}]
@@ -49,6 +50,10 @@ manifest-path = "crates/rlox-python/Cargo.toml"
 module-name = "rlox._rlox_core"
 python-source = "python"
 features = ["pyo3/extension-module"]
+# License files live at the repo root but the manifest is under crates/; include
+# them explicitly so they are bundled into the sdist (PyPI validates that every
+# declared License-File exists in the distribution).
+include = ["LICENSE-APACHE", "LICENSE-MIT"]
 
 [tool.pytest.ini_options]
 markers = [
