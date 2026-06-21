@@ -67,7 +67,7 @@ jobs:
     name: Publish to PyPI
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     environment: pypi
     permissions:
       id-token: write
@@ -84,3 +84,9 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+          # API-token auth (repo secret). Trusted-publishing/OIDC remains the
+          # path for the `release` trigger; this token covers manual dispatch.
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          # PEP 740 attestations require a configured trusted publisher; disable
+          # them on the token path.
+          attestations: false
