@@ -3,12 +3,11 @@
 Wraps the rlox Baseline (``in_loop``) and Treatment (``rlox`` server) dispatch
 into a standard ``verifiers`` environment that prime-rl can drive directly.
 
-**Self-contained design**: the pure-Python backend helpers are vendored into
-this package (``_backend.py``, ``_adversarial.py``) so that ``rlox_verify``
-installs and runs without the Rust-extension ``rlox`` package being present in
-the same venv.  The canonical implementations live in
-``python/rlox/agentic/{verifiers_adapter,adversarial_corpus}.py`` — keep them
-in sync when changing dispatch or corpus logic.
+**Single-source design**: the code-execution backend helpers and adversarial
+corpus logic live in ``rlox_agent`` (``verifiers_adapter`` and
+``adversarial_corpus`` modules) and are imported directly from there.  There
+are no vendored copies in this package — ``rlox-agent`` is declared as a hard
+dependency in ``pyproject.toml``.
 
 **Data-flow (verifiers 0.1.15.dev)**:
 
@@ -55,12 +54,12 @@ from typing import Any
 
 import verifiers as vf
 
-from rlox_verify._adversarial import (
+from rlox_agent.adversarial_corpus import (
     AdversarialCorpus,
     AdversarialInjector,
     AdversarialSample,
 )
-from rlox_verify._backend import call_rlox_server, extract_text, run_in_loop
+from rlox_agent.verifiers_adapter import call_rlox_server, extract_text, run_in_loop
 
 logger = logging.getLogger(__name__)
 

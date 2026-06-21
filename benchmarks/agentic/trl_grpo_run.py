@@ -11,8 +11,8 @@ Key design decisions
 * LoRA (r=32, alpha=64) on all attention+MLP projections keeps the trainable
   parameter count low while covering the full network surface.
 * ``bf16=True`` + ``gradient_checkpointing=True`` for memory efficiency.
-* Reward function reuses ``rlox_verify._backend`` and ``_adversarial``
-  directly — the package is pip-installed in the prime-rl venv.
+* Reward function imports from ``rlox_agent`` (``verifiers_adapter`` and
+  ``adversarial_corpus``) — the canonical single-source backend.
 * Dataset: 50 MBPP problems loaded via ``rlox_verify._load_mbpp_problems``
   (seeded, deterministic slice) repeated to give the trainer enough rows;
   each row carries a ``tests`` column that the reward function reads via
@@ -96,7 +96,7 @@ LORA_TARGET_MODULES = [
     "down_proj",
 ]
 
-# Per-completion execution timeout forwarded to rlox_verify._backend.
+# Per-completion execution timeout forwarded to rlox_agent.verifiers_adapter.
 EXECUTION_TIMEOUT_SECS: float = 5.0
 
 # Dataset repetitions: repeat the problem set enough times so TRL always
@@ -258,12 +258,12 @@ def make_reward_func(
             3. hard-failure — FileNotFoundError is raised so the misconfiguration
                is never silently swallowed.
     """
-    from rlox_verify._adversarial import (
+    from rlox_agent.adversarial_corpus import (
         AdversarialCorpus,
         AdversarialInjector,
         AdversarialSample,
     )
-    from rlox_verify._backend import call_rlox_server, extract_text, run_in_loop
+    from rlox_agent.verifiers_adapter import call_rlox_server, extract_text, run_in_loop
 
     injector: AdversarialInjector | None = None
     if adversarial_fraction > 0.0:

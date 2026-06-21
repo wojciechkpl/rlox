@@ -57,7 +57,7 @@ class RloxVerifierConfig:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _extract_text(messages: list[dict] | str) -> str:
+def extract_text(messages: list[dict] | str) -> str:
     """Return the text content from a messages list or a plain string."""
     if isinstance(messages, str):
         return messages
@@ -75,7 +75,12 @@ def _extract_text(messages: list[dict] | str) -> str:
     return "\n".join(parts)
 
 
-def _run_in_loop(code: str, tests: str, timeout: float) -> float:
+# Private aliases kept for backward compatibility with any code that imported
+# the underscore-prefixed names before Step 3.1.
+_extract_text = extract_text
+
+
+def run_in_loop(code: str, tests: str, timeout: float) -> float:
     """Execute *code* against *tests* in the current venv via subprocess.
 
     This is the Baseline path — no isolation layer, no network call.
@@ -96,7 +101,11 @@ def _run_in_loop(code: str, tests: str, timeout: float) -> float:
         return 0.0
 
 
-def _call_rlox_server(
+# Private alias kept for backward compatibility.
+_run_in_loop = run_in_loop
+
+
+def call_rlox_server(
     code: str,
     tests: str,
     is_adversarial: bool,
@@ -129,6 +138,10 @@ def _call_rlox_server(
             exc,
         )
         return 0.0
+
+
+# Private alias kept for backward compatibility.
+_call_rlox_server = call_rlox_server
 
 
 # ---------------------------------------------------------------------------
@@ -235,16 +248,16 @@ def load_environment(config: RloxVerifierConfig) -> "vf.Environment":  # noqa: F
             code_text = task.code
             tests_text = ""
         else:
-            code_text = _extract_text(completion)
-            tests_text = answer if isinstance(answer, str) else _extract_text(answer)
+            code_text = extract_text(completion)
+            tests_text = answer if isinstance(answer, str) else extract_text(answer)
 
         if backend == "rlox":
-            reward = _call_rlox_server(
+            reward = call_rlox_server(
                 code_text, tests_text, is_adversarial, server_url, timeout
             )
         else:
             # in_loop baseline — must NOT contact any remote server
-            reward = _run_in_loop(code_text, tests_text, timeout)
+            reward = run_in_loop(code_text, tests_text, timeout)
 
         # Write per-function result into state so consumers can inspect it.
         # verifiers calls us with state= as a keyword; guard against None for

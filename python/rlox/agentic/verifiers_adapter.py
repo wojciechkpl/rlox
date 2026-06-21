@@ -3,6 +3,11 @@ from rlox_agent.verifiers_adapter import *  # noqa: F401, F403
 from rlox_agent.verifiers_adapter import (  # noqa: F401
     RloxVerifierConfig,
     load_environment,
+    # Public names (promoted in Step 3.1)
+    extract_text,
+    run_in_loop,
+    call_rlox_server,
+    # Private aliases for backward compatibility
     _extract_text,
     _run_in_loop,
     _call_rlox_server,

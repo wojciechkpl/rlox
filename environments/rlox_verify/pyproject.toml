@@ -5,6 +5,7 @@ description = "verifiers environment package wrapping the rlox Baseline/Treatmen
 tags = ["code-execution", "rlox", "single-turn", "synthetic"]
 requires-python = ">=3.10"
 dependencies = [
+    "rlox-agent>=0.1.0",
     "verifiers>=0.1.15.dev0",
     "httpx>=0.25",
     "datasets>=2.14",
