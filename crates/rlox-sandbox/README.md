@@ -89,7 +89,7 @@ The crate will not compile on macOS or Windows.
 
 ## Public API
 
-The primary entry point is `run_sandboxed()`:
+### Rust entry point: `run_sandboxed()`
 
 ```rust
 pub async fn run_sandboxed(
@@ -115,15 +115,34 @@ pub async fn run_sandboxed(
 
 See `crates/rlox-sandbox/src/worker.rs` for full type definitions.
 
+### HTTP API: `/verify` and `/rollout` endpoints
+
+The crate exposes `rlox-verify-server` binary:
+
+- **`POST /verify`** — sandbox-only reward seam for reward-level hosts (prime-rl/verifiers):
+  - Input: `{code, tests, is_adversarial}` (JSON)
+  - Output: `{reward, backend_stats}` (JSON)
+  - Returns nonce-authenticated reward signal that code cannot forge via `sys.exit(0)` or monkeypatch
+
+- **`POST /rollout`** — full generate+verify service (Component 2 of agentic-benchmark MVP):
+  - Calls vLLM `/v1/completions` endpoint
+  - Runs each completion through sandbox
+  - Computes group-relative advantages via `rlox-rl-ops::GroupRelativeEstimator`
+  - Returns trajectories + `BackendStats` telemetry (P3 containment: `adversarial_contained`, `contagion_events`, `setup_error_events`, `time_to_contain_secs`)
+
+Both endpoints enforce nonce-authenticated reward integrity so model code cannot forge results.
+
 ## Dependencies
 
+- **`rlox-rl-ops`**: Estimator-agnostic advantage ops (`GroupRelativeEstimator` for GRPO reward computation)
 - **`libc`**: Raw Linux syscall bindings (`clone`, `pipe2`, `waitpid`, etc.)
 - **`seccompiler`**: Pure-Rust seccomp-BPF filter builder (Firecracker project)
 - **`tokio`**: Async runtime for timeout polling
+- **`axum`**: HTTP server for `/verify` and `/rollout` endpoints
 - **`serde` / `serde_json`**: JSON serialization of output
 - **`uuid`**: Job ID generation
 
-No C dependencies (libseccomp is not used; the filter is built in pure Rust).
+No C dependencies (libseccomp is not used; the filter is built in pure Rust). `rlox-rl-ops` is intentionally slim (no `rlox-core` dependency) so sandbox doesn't pull the entire training data-plane.
 
 ## License
 
