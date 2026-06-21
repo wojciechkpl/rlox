@@ -21,7 +21,7 @@ from pathlib import Path
 
 REPO = Path("/home/wk/rlox")
 sys.path.insert(0, str(REPO / "benchmarks" / "agentic"))
-sys.path.insert(0, str(REPO / "python" / "rlox" / "agentic"))
+sys.path.insert(0, str(REPO / "python"))
 
 import run_benchmark  # noqa: E402
 

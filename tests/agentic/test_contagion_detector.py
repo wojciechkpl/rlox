@@ -29,8 +29,8 @@ import dataclasses
 import pytest
 
 # Top-level imports — never "from rlox.agentic import ..."
-import contagion_detector as cd
-from contagion_detector import (
+import rlox_agent.contagion_detector as cd
+from rlox_agent.contagion_detector import (
     ContagionDetector,
     ContagionEvent,
     ContagionReport,

@@ -27,8 +27,8 @@ from typing import Iterator
 import pytest
 
 # Top-level import — never "from rlox.agentic import ..."
-import metric_collector as mc
-from metric_collector import MetricCollector, _parse_nvidia_smi_line
+import rlox_agent.metric_collector as mc
+from rlox_agent.metric_collector import MetricCollector, _parse_nvidia_smi_line
 
 
 # ---------------------------------------------------------------------------

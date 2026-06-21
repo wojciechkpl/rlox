@@ -62,8 +62,8 @@ import numpy as np
 import pytest
 
 # Top-level import — never "from rlox.agentic import ..."
-import reporting
-from reporting import (
+import rlox_agent.reporting as reporting
+from rlox_agent.reporting import (
     assess_go_no_go,
     bootstrap_ci,
     ci_overlap_check,

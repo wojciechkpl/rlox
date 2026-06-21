@@ -46,10 +46,10 @@ import pytest
 import verifiers as vf
 
 # Top-level imports — never `from rlox.agentic import ...`
-import adversarial_corpus as ac
-from adversarial_corpus import AdversarialCorpus, AdversarialInjector, AdversarialSample
-import verifiers_adapter as va
-from verifiers_adapter import RloxVerifierConfig, load_environment
+import rlox_agent.adversarial_corpus as ac
+from rlox_agent.adversarial_corpus import AdversarialCorpus, AdversarialInjector, AdversarialSample
+import rlox_agent.verifiers_adapter as va
+from rlox_agent.verifiers_adapter import RloxVerifierConfig, load_environment
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers

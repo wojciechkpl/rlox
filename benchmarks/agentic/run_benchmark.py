@@ -243,10 +243,10 @@ def _main(argv=None) -> int:
     import sys
     from pathlib import Path
 
-    # Make python/rlox/agentic importable for config.py when run as a script.
+    # Make rlox_agent importable for config when run as a script.
     repo_root = Path(__file__).resolve().parents[2]
-    sys.path.insert(0, str(repo_root / "python" / "rlox" / "agentic"))
-    import config as _cfg  # noqa: E402
+    sys.path.insert(0, str(repo_root / "python"))
+    import rlox_agent.config as _cfg  # noqa: E402
 
     p = argparse.ArgumentParser(description="rlox agentic benchmark sweep driver")
     p.add_argument("--config", required=True, help="path to benchmark_v*.yaml")

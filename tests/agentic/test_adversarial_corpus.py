@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 
 # Top-level imports — never `from rlox.agentic import ...`
-import adversarial_corpus as ac
-from adversarial_corpus import (
+import rlox_agent.adversarial_corpus as ac
+from rlox_agent.adversarial_corpus import (
     AdversarialCorpus,
     AdversarialInjector,
     AdversarialSample,

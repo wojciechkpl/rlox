@@ -44,7 +44,7 @@ import pytest
 import yaml
 
 # Top-level imports — never "from rlox.agentic import ..."
-from config import BenchmarkConfig, ConfigValidationError, load_config, validate_config
+from rlox_agent.config import BenchmarkConfig, ConfigValidationError, load_config, validate_config
 
 
 # ---------------------------------------------------------------------------

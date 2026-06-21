@@ -334,14 +334,14 @@ def _compute_guardrail(
     ci_result: dict | None = None
     if _HAS_NUMPY:
         try:
-            # reporting.py lives in python/rlox/agentic/; add its parent to path
-            # if not already present.  We resolve relative to this file's location.
-            _reporting_dir = runs_dir.parents[2] / "python" / "rlox" / "agentic"
-            _reporting_str = str(_reporting_dir)
-            if _reporting_str not in sys.path:
-                sys.path.insert(0, _reporting_str)
+            # rlox_agent.reporting lives in python/rlox_agent/; add python/ to
+            # path if not already present.  We resolve relative to this file.
+            _python_dir = runs_dir.parents[2] / "python"
+            _python_str = str(_python_dir)
+            if _python_str not in sys.path:
+                sys.path.insert(0, _python_str)
 
-            from reporting import ci_overlap_check  # type: ignore[import]
+            from rlox_agent.reporting import ci_overlap_check  # type: ignore[import]
 
             # ci_overlap_check expects list[list[float]] — one sub-list per seed.
             # Each seed contributes one final_reward value; wrap in a list to form

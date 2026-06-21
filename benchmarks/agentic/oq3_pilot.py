@@ -37,8 +37,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "python" / "rlox" / "agentic"))
-import adversarial_corpus as ac  # noqa: E402  (stdlib-only module, isolated import)
+sys.path.insert(0, str(ROOT / "python"))
+import rlox_agent.adversarial_corpus as ac  # noqa: E402  (stdlib-only module, isolated import)
 
 CORPUS_PATH = ROOT / "benchmarks" / "agentic" / "corpus" / "adversarial_corpus_v1.json"
 

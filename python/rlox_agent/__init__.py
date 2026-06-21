@@ -1,11 +1,13 @@
-# python/rlox/agentic/__init__.py
+# python/rlox_agent/__init__.py
 #
-# Canonical home: rlox_agent (python/rlox_agent/).
-# This package is now a backward-compat shim — import rlox.agentic.* still
-# works in the full rlox venv (torch present), but the canonical
-# implementations live in rlox_agent.
+# Standalone agentic package — NO imports at module level.
+# This file must remain importable with plain python3 and zero third-party
+# dependencies (no torch, no _rlox_core, no vllm, no pydantic).
 #
-# Components in rlox_agent:
+# Canonical home for the agentic modules previously housed in rlox.agentic.
+# The old rlox.agentic.* paths remain available as backward-compat shims.
+#
+# Components:
 #   adversarial_corpus   — AdversarialCorpus, AdversarialInjector
 #   verifiers_adapter    — RloxVerifierConfig, load_environment
 #   stats                — BackendStats
