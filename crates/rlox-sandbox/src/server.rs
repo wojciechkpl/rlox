@@ -2,7 +2,7 @@
 ///
 /// ## HTTP contract  (Decision B)
 ///
-/// ```
+/// ```text
 /// POST /rollout
 /// Content-Type: application/json
 ///

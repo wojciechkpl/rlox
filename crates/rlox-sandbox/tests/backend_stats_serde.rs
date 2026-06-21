@@ -291,6 +291,10 @@ fn test_backend_stats_rust_to_python_round_trip() {
         .expect("could not locate repo root from CARGO_MANIFEST_DIR")
         .to_path_buf();
     let stats_py = repo_root.join("python/rlox/agentic/stats.py");
+    // Post-refactor (task #10) the shim re-exports `rlox_agent.stats`, which lives
+    // under `python/`. Put that on sys.path so the shim resolves it (the canonical
+    // module is stdlib-only — no torch — so this stays lightweight).
+    let python_dir = repo_root.join("python");
 
     // Python inline script: load stats.py via importlib, parse JSON, print fields.
     // Uses importlib.util.spec_from_file_location to avoid importing the full
@@ -301,6 +305,7 @@ fn test_backend_stats_rust_to_python_round_trip() {
         r#"
 import sys, json, importlib.util
 
+sys.path.insert(0, {python_dir_repr})
 stats_py_path = {stats_py_repr}
 spec = importlib.util.spec_from_file_location("rlox_agentic_stats", stats_py_path)
 mod = importlib.util.module_from_spec(spec)
@@ -320,6 +325,7 @@ print(bs.cgroup_freeze_events)
 print(bs.setup_error_events)
 "#,
         stats_py_repr = format!("{:?}", stats_py.to_str().unwrap()),
+        python_dir_repr = format!("{:?}", python_dir.to_str().unwrap()),
         json_repr = format!("{:?}", json_str),
     );
 
