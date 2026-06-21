@@ -30,3 +30,13 @@ pub enum RloxError {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 }
+
+impl From<rlox_rl_ops::RlOpsError> for RloxError {
+    fn from(e: rlox_rl_ops::RlOpsError) -> Self {
+        match e {
+            rlox_rl_ops::RlOpsError::ShapeMismatch { expected, got } => {
+                RloxError::ShapeMismatch { expected, got }
+            }
+        }
+    }
+}

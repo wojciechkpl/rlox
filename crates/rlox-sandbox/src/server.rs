@@ -41,6 +41,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
+use rlox_rl_ops::{grpo::GroupRelativeEstimator, AdvantageEstimator};
+
 use crate::stats::BackendStats;
 
 // ---------------------------------------------------------------------------
@@ -61,6 +63,10 @@ struct AppState {
     sandbox_semaphore: Semaphore,
     /// Wall-clock timeout applied to each `/verify` sandbox run.
     verify_timeout_secs: f64,
+    /// Pluggable advantage estimator — currently always GRPO.
+    /// Stored as a trait object so future estimators (DAPO, Dr. GRPO …) can be
+    /// injected via config without changing any handler code.
+    estimator: Arc<dyn AdvantageEstimator>,
 }
 
 // ---------------------------------------------------------------------------
@@ -341,9 +347,10 @@ async fn post_rollout(
 
         // ── 3. Group advantages ──────────────────────────────────────────────
         let group_size = req.group_size as usize;
-        let advantages =
-            rlox_core::llm::ops::f32_ops::compute_batch_group_advantages(&rewards, group_size)
-                .unwrap_or_else(|_| vec![0.0f32; rewards.len()]);
+        let advantages = state
+            .estimator
+            .compute(&rewards, group_size)
+            .unwrap_or_else(|_| vec![0.0f32; rewards.len()]);
 
         // ── 4. Build trajectories + aggregate telemetry ──────────────────────
         for (i, text) in texts.iter().enumerate() {
@@ -869,6 +876,7 @@ pub fn router_with_full_config(
         http_client,
         sandbox_semaphore: Semaphore::new(max_concurrent),
         verify_timeout_secs,
+        estimator: Arc::new(GroupRelativeEstimator),
     });
 
     Router::new()

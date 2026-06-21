@@ -9,6 +9,7 @@ members = [
     "crates/rlox-bench",
     "crates/rlox-grpc",
     "crates/rlox-sandbox",
+    "crates/rlox-rl-ops",
 ]
 exclude = ["examples/rust"]
 

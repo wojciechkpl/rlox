@@ -28,7 +28,7 @@ tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tracing = "0.1"
-rlox-core = { path = "../rlox-core" }
+rlox-rl-ops = { path = "../rlox-rl-ops" }
 
 [dev-dependencies]
 tempfile = "3"
