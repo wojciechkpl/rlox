@@ -377,10 +377,12 @@ impl PyCandleCollector {
     ///
     /// Call this after each PyTorch optimizer step to update the Candle
     /// policy used for collection.
-    fn sync_weights(&self, weights: PyReadonlyArray1<'_, f32>) -> PyResult<()> {
-        let w = weights.as_slice()?;
-        self.shared
-            .sync_weights(w)
+    fn sync_weights(&self, py: Python<'_>, weights: PyReadonlyArray1<'_, f32>) -> PyResult<()> {
+        // Copy to an owned buffer so the write-lock acquisition can run without
+        // the GIL (the collection thread holds read locks; never block the GIL
+        // on a lock the Rust side needs).
+        let w = weights.as_slice()?.to_vec();
+        py.allow_threads(|| self.shared.sync_weights(&w))
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -401,9 +403,13 @@ impl PyCandleCollector {
     }
 
     /// Stop the background collection thread.
-    fn stop(&mut self) {
+    fn stop(&mut self, py: Python<'_>) {
+        // Release the GIL while joining the collection thread so shutdown can
+        // never wedge the interpreter (the deadlock this guards against was
+        // root-caused and fixed in AsyncCollector, but holding the GIL across a
+        // join is wrong regardless).
         if let Some(mut c) = self.collector.take() {
-            c.stop();
+            py.allow_threads(|| c.stop());
         }
     }
 }
