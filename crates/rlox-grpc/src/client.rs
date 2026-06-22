@@ -22,9 +22,11 @@ impl RemoteEnvClient {
     /// Step the remote batch of environments with the given actions.
     ///
     /// Returns a `BatchTransition` compatible with the local `VecEnv` interface.
-    /// Note: `terminal_obs` is not transmitted over the wire and will always be
-    /// `vec![None; num_envs]` -- bootstrap values must be handled server-side
-    /// or via a separate RPC if needed.
+    /// Terminal observations are transmitted over the wire via the response's
+    /// `terminal_obs` (flat, zero-padded) + `has_terminal_obs` (mask) fields and
+    /// reconstructed here as `Vec<Option<Vec<f32>>>`, so truncation bootstrap
+    /// values are preserved. Falls back to `None` per env against older servers
+    /// that do not populate those fields.
     pub async fn step_batch(&mut self, actions: &[Action]) -> Result<BatchTransition, GrpcError> {
         let (flat_actions, discrete, act_dim) = flatten_actions(actions)?;
 
@@ -49,6 +51,23 @@ impl RemoteEnvClient {
             vec![vec![]; num_envs]
         };
 
+        // Reconstruct terminal observations from the flat buffer + mask.
+        // The server zero-pads each slot to obs_dim, so we chunk by obs_dim
+        // and yield Some(chunk) only where has_terminal_obs[i] is true.
+        let terminal_obs: Vec<Option<Vec<f32>>> = if obs_dim > 0
+            && !response.terminal_obs.is_empty()
+            && !response.has_terminal_obs.is_empty()
+        {
+            response
+                .terminal_obs
+                .chunks_exact(obs_dim)
+                .zip(response.has_terminal_obs.iter())
+                .map(|(chunk, &has)| if has { Some(chunk.to_vec()) } else { None })
+                .collect()
+        } else {
+            vec![None; num_envs]
+        };
+
         Ok(BatchTransition {
             obs,
             obs_flat: Vec::new(),
@@ -56,7 +75,7 @@ impl RemoteEnvClient {
             rewards: response.rewards,
             terminated: response.terminated,
             truncated: response.truncated,
-            terminal_obs: vec![None; num_envs],
+            terminal_obs,
         })
     }
 
