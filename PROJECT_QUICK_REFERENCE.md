@@ -137,6 +137,20 @@ Python interpreter: always invoke via `./.venv/bin/python`, never bare
 - **`Trainer.evaluate()` freezes VecNormalize** stats automatically and
   restores them after evaluation. Seeds episodes as `seed + ep` to avoid
   inflated pseudo-precision.
+- **Algorithm maturity is explicit.** `rlox.trainer.ALGORITHM_STATUS` maps every
+  registered algo to `"validated"` (PPO/SAC/TD3/DQN/A2C — multi-seed SB3 parity)
+  or `"experimental"` (the other 13). `Trainer.status` exposes it, `repr(trainer)`
+  shows it, and constructing an experimental algo by name emits a `UserWarning`.
+  A test (`tests/python/test_algorithm_status.py`) enforces
+  `set(ALGORITHM_STATUS) == set(ALGORITHM_REGISTRY)`, so a new algo must declare a
+  status. Add new validated algos to `_VALIDATED` in `trainer.py`; everything else
+  defaults to experimental.
+- **Don't "deduplicate" the per-algo `_RUST_NATIVE_ENVS = {"CartPole-v1",
+  "CartPole"}`** in `ppo.py`/`trpo.py`/`vpg.py` against
+  `collectors._NATIVE_ENV_IDS`. They differ on purpose: the collector set also
+  includes Pendulum, but those on-policy algos only route the *discrete* CartPole
+  through the native Rust `VecEnv`. Merging them would send Pendulum down the Rust
+  path and change behavior.
 
 ---
 

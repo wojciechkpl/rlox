@@ -77,6 +77,48 @@ graph TD
 | [GRPO](grpo.md) | Token sequences | Stochastic (LLM) | N/A | Medium | Medium |
 | [DPO](dpo.md) | Token sequences | Stochastic (LLM) | N/A | High | Low |
 
+## Maturity status
+
+Not every algorithm carries the same level of validation. rlox is honest about
+this: each algorithm registered with the unified `Trainer` declares a maturity
+status, exposed programmatically via `Trainer.status` and
+`rlox.trainer.algorithm_status(name)`.
+
+| Status | Meaning | Algorithms |
+|--------|---------|-----------|
+| **validated** | Convergence-tested with multi-seed Stable-Baselines3 parity | PPO, SAC, TD3, DQN, A2C |
+| **experimental** | Implemented and unit-tested, but **not** convergence-validated — APIs and results may change | TRPO, VPG, IMPALA, MAPPO, MPO, DreamerV3, QMIX, Cal-QL, Diffusion Policy, Decision Transformer, AWR, RWDTP/RCDTP |
+
+Offline-only (CQL, IQL, BC, TD3+BC) and LLM post-training (GRPO, DPO) algorithms
+are used through their own entry points rather than the `Trainer` registry; treat
+them as experimental unless a benchmark says otherwise.
+
+```python
+from rlox import Trainer
+
+trainer = Trainer("ppo", env="CartPole-v1")
+trainer.status          # "validated"
+repr(trainer)           # "Trainer(algorithm='ppo', env='CartPole-v1', status='validated')"
+
+# Constructing an experimental algorithm emits a UserWarning:
+Trainer("trpo", env="CartPole-v1")
+# UserWarning: Algorithm 'trpo' is experimental: implemented but not
+# convergence-validated. Validated algorithms: a2c, dqn, ppo, sac, td3.
+```
+
+```python
+from rlox.trainer import algorithm_status, ALGORITHM_STATUS
+
+algorithm_status("PPO")     # "validated" (case-insensitive)
+ALGORITHM_STATUS["trpo"]    # "experimental"
+```
+
+> **Why this matters:** a "validated" label means we have multi-seed convergence
+> evidence on standard benchmarks. An "experimental" label means the algorithm is
+> structurally complete and unit-tested, but we have not yet pinned its
+> convergence — use it for research and prototyping, and report results with that
+> caveat.
+
 ## Choosing an algorithm
 
 **Start with PPO.** It works across discrete and continuous action spaces, is stable, and requires minimal tuning. Branch out from there:
