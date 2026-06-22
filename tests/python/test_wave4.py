@@ -352,6 +352,133 @@ class TestAWR:
         # Verify the beta parameter is stored
         assert awr.beta == 1.0
 
+    # ------------------------------------------------------------------
+    # Regression tests for AWR.predict() AttributeError on self.policy
+    # Bug: predict() called self.policy.actor() / hasattr(self.policy, ...)
+    # but AWR.__init__ never sets self.policy — it sets self.actor and
+    # self.critic.  The fix must use self.actor and self.discrete instead.
+    # ------------------------------------------------------------------
+
+    def test_predict_discrete_single_obs_returns_valid_action(self):
+        """predict() on CartPole-v1 (discrete) returns an int in the action space.
+
+        Assumption: AWR.predict(obs, deterministic=True) for a discrete env
+        returns a Python int (or numpy int) in range [0, n_actions).
+        """
+        import gymnasium as gym
+        from rlox.algorithms.awr import AWR
+
+        awr = AWR(env_id="CartPole-v1", seed=0)
+        env = gym.make("CartPole-v1")
+        obs, _ = env.reset(seed=0)  # shape (4,)
+
+        # Must not raise AttributeError: 'AWR' object has no attribute 'policy'
+        action = awr.predict(obs, deterministic=True)
+
+        assert env.action_space.contains(int(action)), (
+            f"predict() returned {action!r} which is not in CartPole-v1 action space"
+        )
+
+    def test_predict_discrete_batch_obs_returns_valid_action(self):
+        """predict() on CartPole-v1 with a pre-batched (1, obs_dim) tensor works.
+
+        Assumption: if the caller manually adds the batch dimension the method
+        still returns a valid action without raising.
+        """
+        import gymnasium as gym
+        import torch
+        from rlox.algorithms.awr import AWR
+
+        awr = AWR(env_id="CartPole-v1", seed=1)
+        env = gym.make("CartPole-v1")
+        obs, _ = env.reset(seed=1)
+        obs_batched = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)  # (1, 4)
+
+        action = awr.predict(obs_batched, deterministic=True)
+
+        assert env.action_space.contains(int(action)), (
+            f"predict() with batched obs returned {action!r} which is not in action space"
+        )
+
+    def test_predict_continuous_returns_correct_shape_and_bounds(self):
+        """predict() on Pendulum-v1 (continuous) returns a numpy array of shape (act_dim,).
+
+        Assumption: AWR.predict(obs, deterministic=True) for a continuous env
+        returns a numpy ndarray with shape equal to the environment's action
+        space shape (1,) for Pendulum-v1.  The bug causes AttributeError before
+        any shape check is reachable.
+        """
+        import gymnasium as gym
+        import numpy as np
+        from rlox.algorithms.awr import AWR
+
+        awr = AWR(env_id="Pendulum-v1", seed=0)
+        env = gym.make("Pendulum-v1")
+        obs, _ = env.reset(seed=0)  # shape (3,)
+
+        # Must not raise AttributeError: 'AWR' object has no attribute 'policy'
+        action = awr.predict(obs, deterministic=True)
+
+        expected_shape = env.action_space.shape  # (1,)
+        assert hasattr(action, "shape"), (
+            f"predict() on continuous env must return an array-like, got {type(action)}"
+        )
+        assert action.shape == expected_shape, (
+            f"predict() returned shape {action.shape}, expected {expected_shape}"
+        )
+        # Action should be within action bounds (Pendulum: [-2, 2])
+        low = env.action_space.low
+        high = env.action_space.high
+        assert np.all(action >= low) and np.all(action <= high), (
+            f"predict() returned action {action} outside bounds [{low}, {high}]"
+        )
+
+    def test_predict_discrete_deterministic_is_reproducible(self):
+        """predict(obs, deterministic=True) returns the same action on repeated calls.
+
+        Assumption: deterministic=True must suppress sampling; for a discrete env
+        this means argmax over logits, so the same obs always yields the same action.
+        """
+        from rlox.algorithms.awr import AWR
+        import gymnasium as gym
+
+        awr = AWR(env_id="CartPole-v1", seed=7)
+        env = gym.make("CartPole-v1")
+        obs, _ = env.reset(seed=7)
+
+        action_1 = awr.predict(obs, deterministic=True)
+        action_2 = awr.predict(obs, deterministic=True)
+
+        assert action_1 == action_2, (
+            f"deterministic=True produced different actions on identical obs: "
+            f"{action_1} vs {action_2}"
+        )
+
+    def test_predict_continuous_deterministic_is_reproducible(self):
+        """predict(obs, deterministic=True) for continuous env is same on repeated calls.
+
+        Assumption: for a continuous env, deterministic=True must return the
+        mean action (actor output) without stochastic sampling.
+        """
+        import numpy as np
+        from rlox.algorithms.awr import AWR
+        import gymnasium as gym
+
+        awr = AWR(env_id="Pendulum-v1", seed=3)
+        env = gym.make("Pendulum-v1")
+        obs, _ = env.reset(seed=3)
+
+        action_1 = awr.predict(obs, deterministic=True)
+        action_2 = awr.predict(obs, deterministic=True)
+
+        np.testing.assert_array_equal(
+            action_1, action_2,
+            err_msg=(
+                "deterministic=True for continuous env produced different actions "
+                f"on identical obs: {action_1} vs {action_2}"
+            ),
+        )
+
 
 # ============================================================================
 # TestRND
