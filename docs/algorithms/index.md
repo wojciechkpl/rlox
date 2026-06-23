@@ -87,8 +87,13 @@ status, exposed programmatically via `Trainer.status` and
 
 | Status | Meaning | Algorithms |
 |--------|---------|-----------|
-| **validated** | Convergence-tested with multi-seed Stable-Baselines3 parity | PPO, SAC, TD3, DQN, A2C |
-| **experimental** | Implemented and unit-tested, but **not** convergence-validated — APIs and results may change | TRPO, VPG, IMPALA, MAPPO, MPO, DreamerV3, QMIX, Cal-QL, Diffusion Policy, Decision Transformer, AWR, RWDTP/RCDTP, **PQN** |
+| **validated** | Convergence-tested with multi-seed evidence on standard benchmarks | PPO, SAC, TD3, DQN, A2C, TRPO |
+| **experimental** | Implemented and unit-tested, but **not** convergence-validated — APIs and results may change | VPG, IMPALA, MAPPO, MPO, DreamerV3, QMIX, Cal-QL, Diffusion Policy, Decision Transformer, AWR, RWDTP/RCDTP, PQN |
+
+> **TRPO** is validated on **CartPole-v1** (5-seed IQM = 500.0; config at
+> `benchmarks/convergence/configs/trpo_cartpole.yaml`) and confirmed learning on
+> continuous control (Hopper-v4). A full MuJoCo multi-seed parity sweep is the
+> tracked follow-up.
 
 Offline-only (CQL, IQL, BC, TD3+BC) and LLM post-training (GRPO, DPO) algorithms
 are used through their own entry points rather than the `Trainer` registry; treat
@@ -102,16 +107,17 @@ trainer.status          # "validated"
 repr(trainer)           # "Trainer(algorithm='ppo', env='CartPole-v1', status='validated')"
 
 # Constructing an experimental algorithm emits a UserWarning:
-Trainer("trpo", env="CartPole-v1")
-# UserWarning: Algorithm 'trpo' is experimental: implemented but not
-# convergence-validated. Validated algorithms: a2c, dqn, ppo, sac, td3.
+Trainer("vpg", env="CartPole-v1")
+# UserWarning: Algorithm 'vpg' is experimental: implemented but not
+# convergence-validated. Validated algorithms: a2c, dqn, ppo, sac, td3, trpo.
 ```
 
 ```python
 from rlox.trainer import algorithm_status, ALGORITHM_STATUS
 
 algorithm_status("PPO")     # "validated" (case-insensitive)
-ALGORITHM_STATUS["trpo"]    # "experimental"
+ALGORITHM_STATUS["vpg"]     # "experimental"
+ALGORITHM_STATUS["trpo"]    # "validated"
 ```
 
 > **Why this matters:** a "validated" label means we have multi-seed convergence

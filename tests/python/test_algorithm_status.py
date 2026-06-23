@@ -11,7 +11,7 @@ Contract (does NOT exist yet — these tests are RED):
     validated algos and custom classes do NOT.
 
 Assumptions (implementer must honor):
-  - Validated names are exactly: {"ppo", "sac", "td3", "dqn", "a2c"}.
+  - Validated names are exactly: {"ppo", "sac", "td3", "dqn", "a2c", "trpo"}.
   - Every other name currently in ALGORITHM_REGISTRY is "experimental".
   - ``algorithm_status`` is case-insensitive; lookup is by lower-cased name.
   - A custom (user-supplied) algo class has ``status == "experimental"``
@@ -31,10 +31,10 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
-_VALIDATED = frozenset({"ppo", "sac", "td3", "dqn", "a2c"})
+_VALIDATED = frozenset({"ppo", "sac", "td3", "dqn", "a2c", "trpo"})
 _EXPERIMENTAL = frozenset({
     "awr", "calql", "diffusion", "dreamer", "dt",
-    "impala", "mappo", "mpo", "qmix", "rcdtp", "rwdtp", "trpo", "vpg",
+    "impala", "mappo", "mpo", "qmix", "rcdtp", "rwdtp", "vpg",
 })
 
 
@@ -129,10 +129,12 @@ class TestAlgorithmStatusFunction:
 
         assert algorithm_status("a2c") == "validated"
 
-    def test_returns_experimental_for_trpo(self) -> None:
+    def test_returns_validated_for_trpo(self) -> None:
+        # TRPO promoted to validated: CartPole-v1 multi-seed IQM=500
+        # (benchmarks/convergence/configs/trpo_cartpole.yaml).
         from rlox.trainer import algorithm_status
 
-        assert algorithm_status("trpo") == "experimental"
+        assert algorithm_status("trpo") == "validated"
 
     def test_returns_experimental_for_vpg(self) -> None:
         from rlox.trainer import algorithm_status
@@ -146,10 +148,10 @@ class TestAlgorithmStatusFunction:
         assert algorithm_status("PPO") == "validated"
 
     def test_case_insensitive_trpo_mixed(self) -> None:
-        """'Trpo' (mixed case) must resolve to 'experimental'."""
+        """'Trpo' (mixed case) must resolve to 'validated'."""
         from rlox.trainer import algorithm_status
 
-        assert algorithm_status("Trpo") == "experimental"
+        assert algorithm_status("Trpo") == "validated"
 
     def test_unknown_name_raises_value_error(self) -> None:
         """algorithm_status raises ValueError for an unregistered name."""
@@ -207,13 +209,11 @@ class TestTrainerStatusProperty:
         trainer = Trainer("a2c", env="CartPole-v1")
         assert trainer.status == "validated"
 
-    def test_trpo_trainer_status_is_experimental(self) -> None:
+    def test_trpo_trainer_status_is_validated(self) -> None:
         from rlox.trainer import Trainer
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            trainer = Trainer("trpo", env="CartPole-v1")
-        assert trainer.status == "experimental"
+        trainer = Trainer("trpo", env="CartPole-v1")
+        assert trainer.status == "validated"
 
     def test_vpg_trainer_status_is_experimental(self) -> None:
         from rlox.trainer import Trainer
@@ -257,20 +257,16 @@ class TestTrainerRepr:
     def test_repr_contains_algo_name_for_trpo(self) -> None:
         from rlox.trainer import Trainer
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            trainer = Trainer("trpo", env="CartPole-v1")
+        trainer = Trainer("trpo", env="CartPole-v1")
         r = repr(trainer)
         assert "trpo" in r, f"Expected 'trpo' in repr, got: {r!r}"
 
     def test_repr_contains_status_for_trpo(self) -> None:
         from rlox.trainer import Trainer
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            trainer = Trainer("trpo", env="CartPole-v1")
+        trainer = Trainer("trpo", env="CartPole-v1")
         r = repr(trainer)
-        assert "experimental" in r, f"Expected 'experimental' in repr, got: {r!r}"
+        assert "validated" in r, f"Expected 'validated' in repr, got: {r!r}"
 
     def test_repr_contains_algo_name_for_vpg(self) -> None:
         from rlox.trainer import Trainer
@@ -300,18 +296,18 @@ class TestTrainerWarnings:
     """Warning behaviour at construction time."""
 
     def test_experimental_algo_emits_user_warning(self) -> None:
-        """Constructing Trainer('trpo', ...) fires a UserWarning about 'experimental'."""
+        """Constructing Trainer('vpg', ...) fires a UserWarning about 'experimental'."""
         from rlox.trainer import Trainer
 
         with pytest.warns(UserWarning, match="experimental"):
-            Trainer("trpo", env="CartPole-v1")
+            Trainer("vpg", env="CartPole-v1")
 
     def test_experimental_warning_contains_algo_name(self) -> None:
         """The UserWarning for an experimental algo must mention the algo name."""
         from rlox.trainer import Trainer
 
-        with pytest.warns(UserWarning, match="trpo"):
-            Trainer("trpo", env="CartPole-v1")
+        with pytest.warns(UserWarning, match="vpg"):
+            Trainer("vpg", env="CartPole-v1")
 
     def test_vpg_experimental_warning_contains_vpg(self) -> None:
         """The UserWarning for vpg must mention 'vpg'."""

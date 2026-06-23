@@ -81,7 +81,7 @@ ALGORITHM_STATUSES: frozenset[str] = frozenset({"validated", "experimental"})
 
 # Algorithms that have passed convergence validation (SB3 parity, multi-seed).
 # Everything else defaults to "experimental".
-_VALIDATED: frozenset[str] = frozenset({"ppo", "sac", "td3", "dqn", "a2c"})
+_VALIDATED: frozenset[str] = frozenset({"ppo", "sac", "td3", "dqn", "a2c", "trpo"})
 
 # Populated after _register_builtins() runs (see bottom of module).
 ALGORITHM_STATUS: dict[str, str] = {}
