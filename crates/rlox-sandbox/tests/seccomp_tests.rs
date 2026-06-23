@@ -25,9 +25,11 @@ mod seccomp_tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_build_filter_returns_non_empty_bytes() {
-        let compiled = seccomp::build_filter()
-            .expect("build_filter should succeed");
-        assert!(!compiled.is_empty(), "compiled BPF filter must not be empty");
+        let compiled = seccomp::build_filter().expect("build_filter should succeed");
+        assert!(
+            !compiled.is_empty(),
+            "compiled BPF filter must not be empty"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -44,12 +46,10 @@ mod seccomp_tests {
         let compiled_clone = compiled.clone();
         // Safety: fork is inherently unsafe; no shared data is mutated.
         match unsafe { fork() }.expect("fork should succeed") {
-            ForkResult::Child => {
-                match seccomp::install_filter(&compiled_clone) {
-                    Ok(()) => std::process::exit(0),
-                    Err(_) => std::process::exit(2),
-                }
-            }
+            ForkResult::Child => match seccomp::install_filter(&compiled_clone) {
+                Ok(()) => std::process::exit(0),
+                Err(_) => std::process::exit(2),
+            },
             ForkResult::Parent { child } => {
                 let status = waitpid(child, None).expect("waitpid");
                 match status {
@@ -84,9 +84,7 @@ mod seccomp_tests {
                     std::process::exit(2);
                 }
                 // Attempt socket(AF_INET=2, SOCK_STREAM=1, 0)
-                let ret = unsafe {
-                    libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)
-                };
+                let ret = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
                 if ret == -1 {
                     // Syscall was blocked (EPERM or ENOSYS) — correct.
                     std::process::exit(0);
@@ -136,9 +134,7 @@ mod seccomp_tests {
                     std::process::exit(2);
                 }
                 let msg = b"ok\n";
-                let ret = unsafe {
-                    libc::write(1, msg.as_ptr() as *const libc::c_void, msg.len())
-                };
+                let ret = unsafe { libc::write(1, msg.as_ptr() as *const libc::c_void, msg.len()) };
                 if ret >= 0 {
                     std::process::exit(0); // write allowed — correct
                 } else {

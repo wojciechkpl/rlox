@@ -91,11 +91,7 @@ impl EnvService for EnvWorker {
 
         // Encode terminal observations: flatten into a contiguous buffer
         // (zero-padded for envs without a terminal obs) plus a boolean mask.
-        let has_terminal_obs: Vec<bool> = batch
-            .terminal_obs
-            .iter()
-            .map(|t| t.is_some())
-            .collect();
+        let has_terminal_obs: Vec<bool> = batch.terminal_obs.iter().map(|t| t.is_some()).collect();
         let mut flat_terminal_obs: Vec<f32> = Vec::with_capacity(num_envs * obs_dim);
         for slot in batch.terminal_obs {
             match slot {
@@ -111,7 +107,7 @@ impl EnvService for EnvWorker {
                     }
                     flat_terminal_obs.extend_from_slice(&obs);
                 }
-                None => flat_terminal_obs.extend(std::iter::repeat(0.0f32).take(obs_dim)),
+                None => flat_terminal_obs.extend(std::iter::repeat_n(0.0f32, obs_dim)),
             }
         }
 

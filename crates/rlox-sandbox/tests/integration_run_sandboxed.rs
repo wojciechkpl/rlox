@@ -19,9 +19,7 @@
 ///     detection to the moment `cgroup.kill` is written (not the total).
 #[cfg(target_os = "linux")]
 mod integration_run_sandboxed {
-    use rlox_sandbox::worker::{
-        run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput,
-    };
+    use rlox_sandbox::worker::{run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput};
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -35,9 +33,7 @@ mod integration_run_sandboxed {
             mem_limit_bytes: 128 * 1024 * 1024, // 128 MiB
             pids_limit: 64,
             cpu_weight: 100,
-            cgroup_base: PathBuf::from(format!(
-                "/sys/fs/cgroup/user.slice/user-{uid}.slice"
-            )),
+            cgroup_base: PathBuf::from(format!("/sys/fs/cgroup/user.slice/user-{uid}.slice")),
         }
     }
 

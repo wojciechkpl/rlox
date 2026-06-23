@@ -17,9 +17,7 @@ mod cgroup_tests {
     // -----------------------------------------------------------------------
     fn require_user_cgroup_root() -> PathBuf {
         let uid = unsafe { libc::getuid() };
-        let p = PathBuf::from(format!(
-            "/sys/fs/cgroup/user.slice/user-{uid}.slice"
-        ));
+        let p = PathBuf::from(format!("/sys/fs/cgroup/user.slice/user-{uid}.slice"));
         if !p.exists() {
             panic!(
                 "cgroup test skipped: per-user delegation not found at {p:?}. \
@@ -76,8 +74,7 @@ mod cgroup_tests {
         );
 
         // Cleanup must also succeed
-        cgroup::destroy_leaf(&leaf_path)
-            .expect("destroy_leaf should succeed on an empty leaf");
+        cgroup::destroy_leaf(&leaf_path).expect("destroy_leaf should succeed on an empty leaf");
 
         assert!(
             !leaf_path.exists(),
@@ -95,11 +92,10 @@ mod cgroup_tests {
         let leaf_path = cgroup::create_leaf(&base, &leaf_name).unwrap();
 
         let limit_bytes: u64 = 64 * 1024 * 1024; // 64 MiB
-        cgroup::write_memory_max(&leaf_path, limit_bytes)
-            .expect("write_memory_max should succeed");
+        cgroup::write_memory_max(&leaf_path, limit_bytes).expect("write_memory_max should succeed");
 
-        let read_back = cgroup::read_memory_max(&leaf_path)
-            .expect("read_memory_max should succeed");
+        let read_back =
+            cgroup::read_memory_max(&leaf_path).expect("read_memory_max should succeed");
 
         // cgroup v2 may round up to page granularity; accept within one page.
         let page = 4096u64;
@@ -121,11 +117,9 @@ mod cgroup_tests {
         let leaf_path = cgroup::create_leaf(&base, &leaf_name).unwrap();
 
         let limit: u32 = 32;
-        cgroup::write_pids_max(&leaf_path, limit)
-            .expect("write_pids_max should succeed");
+        cgroup::write_pids_max(&leaf_path, limit).expect("write_pids_max should succeed");
 
-        let read_back = cgroup::read_pids_max(&leaf_path)
-            .expect("read_pids_max should succeed");
+        let read_back = cgroup::read_pids_max(&leaf_path).expect("read_pids_max should succeed");
 
         assert_eq!(
             read_back, limit,
@@ -148,8 +142,8 @@ mod cgroup_tests {
         let leaf_name = format!("rlox-test-ctrl-{}", uuid::Uuid::new_v4());
         let leaf_path = cgroup::create_leaf(&base, &leaf_name).unwrap();
 
-        let controllers = cgroup::read_controllers(&leaf_path)
-            .expect("read_controllers should succeed");
+        let controllers =
+            cgroup::read_controllers(&leaf_path).expect("read_controllers should succeed");
 
         assert!(
             controllers.iter().any(|c| c == "memory"),

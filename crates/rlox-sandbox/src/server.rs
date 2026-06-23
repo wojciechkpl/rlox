@@ -327,16 +327,15 @@ async fn post_rollout(
 
         // ── 2. Sandbox dispatch ──────────────────────────────────────────────
         #[cfg(target_os = "linux")]
-        let sandbox_results: Vec<crate::worker::SandboxOutput> =
-            run_group_in_sandbox(
-                &texts,
-                task,
-                req.per_sample_timeout_secs,
-                &state.config,
-                &cgroup_base,
-                &state.sandbox_semaphore,
-            )
-            .await;
+        let sandbox_results: Vec<crate::worker::SandboxOutput> = run_group_in_sandbox(
+            &texts,
+            task,
+            req.per_sample_timeout_secs,
+            &state.config,
+            &cgroup_base,
+            &state.sandbox_semaphore,
+        )
+        .await;
 
         #[cfg(target_os = "linux")]
         let rewards: Vec<f32> = sandbox_results.iter().map(|o| o.pass_rate).collect();
@@ -355,8 +354,7 @@ async fn post_rollout(
         // ── 4. Build trajectories + aggregate telemetry ──────────────────────
         for (i, text) in texts.iter().enumerate() {
             // response_ids: UTF-8 byte values cast to i32.
-            let response_ids: Vec<i32> =
-                text.as_bytes().iter().map(|&b| b as i32).collect();
+            let response_ids: Vec<i32> = text.as_bytes().iter().map(|&b| b as i32).collect();
             let response_mask: Vec<bool> = vec![true; response_ids.len()];
 
             let reward = *rewards.get(i).unwrap_or(&0.0);
@@ -480,8 +478,7 @@ async fn run_group_in_sandbox(
         run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput, SandboxOutput, SandboxStats,
     };
 
-    let mut join_set: tokio::task::JoinSet<(usize, SandboxOutput)> =
-        tokio::task::JoinSet::new();
+    let mut join_set: tokio::task::JoinSet<(usize, SandboxOutput)> = tokio::task::JoinSet::new();
 
     for (idx, text) in texts.iter().enumerate() {
         // Acquire a semaphore permit before spawning — blocks if at capacity.
@@ -682,8 +679,9 @@ async fn post_verify(
             .await
             .expect("sandbox semaphore must not be closed");
 
-        let result = run_sandboxed(input, &sandbox_cfg).await.unwrap_or_else(|_| {
-            SandboxOutput {
+        let result = run_sandboxed(input, &sandbox_cfg)
+            .await
+            .unwrap_or_else(|_| SandboxOutput {
                 job_id,
                 pass_rate: 0.0,
                 reward: 0.0,
@@ -696,8 +694,7 @@ async fn post_verify(
                     cgroup_kill_event: false,
                     oom_event: false,
                 },
-            }
-        });
+            });
 
         drop(permit);
         result

@@ -240,7 +240,7 @@ mod tests {
         let obs = TensorData::zeros(vec![100, 3]);
         let (actions, _) = policy.sample_actions(&obs).unwrap();
         for &a in &actions.data {
-            assert!(a >= -1.0 && a <= 1.0, "out of range: {a}");
+            assert!((-1.0..=1.0).contains(&a), "out of range: {a}");
         }
     }
 

@@ -311,11 +311,7 @@ def add(a, b):
         let (status, resp) = post_rollout(server_addr, &req).await;
 
         assert_eq!(status, 200, "POST /rollout must return HTTP 200");
-        assert_eq!(
-            resp.trajectories.len(),
-            1,
-            "one trajectory per task"
-        );
+        assert_eq!(resp.trajectories.len(), 1, "one trajectory per task");
 
         let traj = &resp.trajectories[0];
 
@@ -333,8 +329,7 @@ def add(a, b):
         );
 
         assert_eq!(
-            resp.backend_stats.rollouts_completed,
-            1,
+            resp.backend_stats.rollouts_completed, 1,
             "rollouts_completed must equal tasks.len()"
         );
     }
@@ -613,11 +608,7 @@ def add(a, b):
         }
 
         // Check rewards: alternating 1.0, 0.0, 1.0, 0.0 (order by choice index).
-        let rewards: Vec<f32> = resp_body
-            .trajectories
-            .iter()
-            .map(|t| t.reward)
-            .collect();
+        let rewards: Vec<f32> = resp_body.trajectories.iter().map(|t| t.reward).collect();
 
         let expected_rewards = [1.0_f32, 0.0, 1.0, 0.0];
         for (i, (&got, &exp)) in rewards.iter().zip(expected_rewards.iter()).enumerate() {
@@ -794,12 +785,10 @@ def add(a, b):
         );
 
         assert_eq!(
-            stats.adversarial_contained,
-            stats.adversarial_injected,
+            stats.adversarial_contained, stats.adversarial_injected,
             "adversarial_contained must equal adversarial_injected (AC-5 hard line); \
              got contained={}, injected={}",
-            stats.adversarial_contained,
-            stats.adversarial_injected
+            stats.adversarial_contained, stats.adversarial_injected
         );
 
         assert!(
@@ -857,8 +846,7 @@ def add(a, b):
         let inf_loop_code = "while True: pass".to_string();
 
         // Mock returns the same infinite-loop code for all 3 completions.
-        let (vllm_addr, _mock_state) =
-            start_mock_vllm(vec![inf_loop_code]).await;
+        let (vllm_addr, _mock_state) = start_mock_vllm(vec![inf_loop_code]).await;
 
         let config = ServerConfig {
             vllm_base_url: format!("http://{vllm_addr}"),
@@ -929,12 +917,10 @@ def add(a, b):
 
         // Internal consistency: contained must equal injected (AC-5 hard line).
         assert_eq!(
-            stats.adversarial_contained,
-            stats.adversarial_injected,
+            stats.adversarial_contained, stats.adversarial_injected,
             "adversarial_contained ({}) must equal adversarial_injected ({}) — \
              all 3 infinite-loop completions must be killed by the sandbox",
-            stats.adversarial_contained,
-            stats.adversarial_injected
+            stats.adversarial_contained, stats.adversarial_injected
         );
 
         assert_eq!(

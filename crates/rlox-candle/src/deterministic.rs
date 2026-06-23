@@ -198,7 +198,7 @@ mod tests {
         let actions = policy.act(&obs).unwrap();
         for &a in &actions.data {
             assert!(
-                a >= -2.0 - 1e-4 && a <= 2.0 + 1e-4,
+                (-2.0 - 1e-4..=2.0 + 1e-4).contains(&a),
                 "action out of range: {a}"
             );
         }

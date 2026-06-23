@@ -42,9 +42,7 @@
 ///     silently execute untrusted code with no resource containment.
 #[cfg(target_os = "linux")]
 mod adversarial_containment {
-    use rlox_sandbox::worker::{
-        run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput,
-    };
+    use rlox_sandbox::worker::{run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput};
     use std::path::PathBuf;
     use std::time::Instant;
     use uuid::Uuid;
@@ -54,9 +52,7 @@ mod adversarial_containment {
     // -----------------------------------------------------------------------
     fn cgroup_base() -> PathBuf {
         let uid = unsafe { libc::getuid() };
-        PathBuf::from(format!(
-            "/sys/fs/cgroup/user.slice/user-{uid}.slice"
-        ))
+        PathBuf::from(format!("/sys/fs/cgroup/user.slice/user-{uid}.slice"))
     }
 
     // -----------------------------------------------------------------------
@@ -209,8 +205,7 @@ mod adversarial_containment {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let survivors = count_python3_survivors(&job_id);
         assert_eq!(
-            survivors,
-            0,
+            survivors, 0,
             "fork bomb left {survivors} surviving python3 process(es) after \
              run_sandboxed returned — descendants were NOT inside the cgroup \
              when cgroup.kill fired (cgroup self-migration silently failed — Bug A)"
@@ -224,13 +219,10 @@ mod adversarial_containment {
             mem_limit_bytes: 64 * 1024 * 1024,
             pids_limit: 16,
             cpu_weight: 100,
-            cgroup_base: PathBuf::from(
-                "/sys/fs/cgroup/rlox-nonexistent-slice-does-not-exist",
-            ),
+            cgroup_base: PathBuf::from("/sys/fs/cgroup/rlox-nonexistent-slice-does-not-exist"),
         };
         let input_no_cgroup = make_input("print('should not run')");
-        let result_no_cgroup =
-            run_sandboxed(input_no_cgroup, &config_no_cgroup).await;
+        let result_no_cgroup = run_sandboxed(input_no_cgroup, &config_no_cgroup).await;
         assert!(
             result_no_cgroup.is_err(),
             "run_sandboxed must return Err when cgroup_base does not exist; \
@@ -281,8 +273,7 @@ mod adversarial_containment {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let survivors = count_python3_survivors(&job_id);
         assert_eq!(
-            survivors,
-            0,
+            survivors, 0,
             "fork bomb (pids_limit=16) left {survivors} survivors — \
              pids.max had no effect because the child was not inside the cgroup (Bug A)"
         );
@@ -303,8 +294,7 @@ mod adversarial_containment {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_memory_bomb_is_oom_killed() {
         // Grows memory by 10 MiB per iteration; at 128 MiB limit this dies fast.
-        let code =
-            "x = bytearray()\nwhile True:\n    x += bytearray(10 * 1024 * 1024)\n";
+        let code = "x = bytearray()\nwhile True:\n    x += bytearray(10 * 1024 * 1024)\n";
 
         let config = tight_config(10.0, 128 * 1024 * 1024, 64);
         let input = make_input(code);
@@ -358,8 +348,7 @@ mod adversarial_containment {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_stdout_flood_does_not_exhaust_parent() {
         // Writes exactly 50 MiB to stdout in one shot.
-        let code =
-            "import sys\nsys.stdout.write('A' * (50 * 1024 * 1024))\nsys.stdout.flush()\n";
+        let code = "import sys\nsys.stdout.write('A' * (50 * 1024 * 1024))\nsys.stdout.flush()\n";
 
         let config = tight_config(10.0, 256 * 1024 * 1024, 64);
         let input = make_input(code);

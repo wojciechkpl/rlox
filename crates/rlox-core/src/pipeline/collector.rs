@@ -5,6 +5,12 @@ use std::time::Duration;
 
 use crossbeam_channel::{SendTimeoutError, Sender};
 
+/// A shared, thread-safe function that maps flat observations to per-env value estimates.
+pub type ValueFn = Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync>;
+
+/// A shared, thread-safe function that maps flat observations to (actions, log-probs).
+pub type ActionFn = Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync>;
+
 /// How long the collector waits on a full channel before re-checking the stop
 /// flag. Bounds shutdown latency so `stop()`/`Drop` cannot deadlock behind a
 /// blocked `send()` when the consumer has stopped draining.
@@ -47,8 +53,8 @@ impl AsyncCollector {
         gamma: f64,
         gae_lambda: f64,
         tx: Sender<RolloutBatch>,
-        value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync>,
-        action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync>,
+        value_fn: ValueFn,
+        action_fn: ActionFn,
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop = stop_flag.clone();
@@ -272,13 +278,11 @@ mod tests {
         let pipe = Pipeline::new(4);
         let tx = pipe.sender();
 
-        let value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync> =
-            Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]); // CartPole obs_dim=4
-        let action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync> =
-            Arc::new(|obs: &[f32]| {
-                let n = obs.len() / 4;
-                (vec![0.0; n], vec![0.0; n]) // always action 0
-            });
+        let value_fn: ValueFn = Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]); // CartPole obs_dim=4
+        let action_fn: ActionFn = Arc::new(|obs: &[f32]| {
+            let n = obs.len() / 4;
+            (vec![0.0; n], vec![0.0; n]) // always action 0
+        });
 
         let mut collector = AsyncCollector::start(
             make_vec_env(2, 42),
@@ -309,13 +313,11 @@ mod tests {
         let pipe = Pipeline::new(2);
         let tx = pipe.sender();
 
-        let value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync> =
-            Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]);
-        let action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync> =
-            Arc::new(|obs: &[f32]| {
-                let n = obs.len() / 4;
-                (vec![0.0; n], vec![0.0; n])
-            });
+        let value_fn: ValueFn = Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]);
+        let action_fn: ActionFn = Arc::new(|obs: &[f32]| {
+            let n = obs.len() / 4;
+            (vec![0.0; n], vec![0.0; n])
+        });
 
         let mut collector =
             AsyncCollector::start(make_vec_env(1, 0), 4, 0.99, 0.95, tx, value_fn, action_fn);
@@ -339,13 +341,11 @@ mod tests {
         let pipe = Pipeline::new(1);
         let tx = pipe.sender();
 
-        let value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync> =
-            Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]);
-        let action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync> =
-            Arc::new(|obs: &[f32]| {
-                let n = obs.len() / 4;
-                (vec![0.0; n], vec![0.0; n])
-            });
+        let value_fn: ValueFn = Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]);
+        let action_fn: ActionFn = Arc::new(|obs: &[f32]| {
+            let n = obs.len() / 4;
+            (vec![0.0; n], vec![0.0; n])
+        });
 
         let mut collector =
             AsyncCollector::start(make_vec_env(1, 7), 4, 0.99, 0.95, tx, value_fn, action_fn);
@@ -377,13 +377,11 @@ mod tests {
         let pipe = Pipeline::new(4);
         let tx = pipe.sender();
 
-        let value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync> =
-            Arc::new(|obs: &[f32]| vec![0.5; obs.len() / 4]);
-        let action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync> =
-            Arc::new(|obs: &[f32]| {
-                let n = obs.len() / 4;
-                (vec![1.0; n], vec![-0.5; n])
-            });
+        let value_fn: ValueFn = Arc::new(|obs: &[f32]| vec![0.5; obs.len() / 4]);
+        let action_fn: ActionFn = Arc::new(|obs: &[f32]| {
+            let n = obs.len() / 4;
+            (vec![1.0; n], vec![-0.5; n])
+        });
 
         let mut collector =
             AsyncCollector::start(make_vec_env(4, 42), 16, 0.99, 0.95, tx, value_fn, action_fn);

@@ -173,9 +173,8 @@ pub fn create_leaf(parent: &Path, name: &str) -> Result<PathBuf, SandboxError> {
     enable_controllers_in_parent(&actual_parent)?;
 
     let leaf = actual_parent.join(name);
-    fs::create_dir(&leaf).map_err(|e| {
-        SandboxError::Cgroup(format!("failed to create cgroup leaf {leaf:?}: {e}"))
-    })?;
+    fs::create_dir(&leaf)
+        .map_err(|e| SandboxError::Cgroup(format!("failed to create cgroup leaf {leaf:?}: {e}")))?;
     Ok(leaf)
 }
 
@@ -183,9 +182,8 @@ pub fn create_leaf(parent: &Path, name: &str) -> Result<PathBuf, SandboxError> {
 ///
 /// The cgroup must have no living processes; kill them first.
 pub fn destroy_leaf(path: &Path) -> Result<(), SandboxError> {
-    fs::remove_dir(path).map_err(|e| {
-        SandboxError::Cgroup(format!("failed to remove cgroup leaf {path:?}: {e}"))
-    })
+    fs::remove_dir(path)
+        .map_err(|e| SandboxError::Cgroup(format!("failed to remove cgroup leaf {path:?}: {e}")))
 }
 
 /// Write `memory.max` (bytes) to the cgroup at `path`.

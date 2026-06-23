@@ -59,9 +59,7 @@
 ///     and replace this helper; the convention above is unchanged.
 #[cfg(target_os = "linux")]
 mod corpus_containment {
-    use rlox_sandbox::worker::{
-        run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput,
-    };
+    use rlox_sandbox::worker::{run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput};
     use serde::Deserialize;
     use std::path::{Path, PathBuf};
     use std::time::Instant;
@@ -99,15 +97,13 @@ mod corpus_containment {
     /// levels up to the workspace root and then into the committed corpus dir.
     fn corpus_json_path() -> PathBuf {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        manifest
-            .join("../../benchmarks/agentic/corpus/adversarial_corpus_v1.json")
+        manifest.join("../../benchmarks/agentic/corpus/adversarial_corpus_v1.json")
     }
 
     /// Absolute path to the companion `.sha256` file.
     fn corpus_sha256_path() -> PathBuf {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        manifest
-            .join("../../benchmarks/agentic/corpus/adversarial_corpus_v1.sha256")
+        manifest.join("../../benchmarks/agentic/corpus/adversarial_corpus_v1.sha256")
     }
 
     /// Load and parse the corpus JSON, panicking with a descriptive message if
@@ -121,12 +117,8 @@ mod corpus_containment {
                 path.display()
             )
         });
-        serde_json::from_str::<Corpus>(&raw).unwrap_or_else(|e| {
-            panic!(
-                "corpus JSON failed to parse ({}): {e}",
-                path.display()
-            )
-        })
+        serde_json::from_str::<Corpus>(&raw)
+            .unwrap_or_else(|e| panic!("corpus JSON failed to parse ({}): {e}", path.display()))
     }
 
     /// Compute SHA-256 of `bytes` via the `sha256sum` command-line utility.
@@ -179,8 +171,7 @@ mod corpus_containment {
         // self-consistent (the digest cannot include itself).
         root["sha256"] = serde_json::Value::String(String::new());
 
-        let canonical = serde_json::to_string(&root)
-            .expect("re-serialisation must succeed");
+        let canonical = serde_json::to_string(&root).expect("re-serialisation must succeed");
 
         sha256_hex(canonical.as_bytes())
     }
@@ -194,9 +185,7 @@ mod corpus_containment {
             mem_limit_bytes: 256 * 1024 * 1024, // 256 MiB
             pids_limit: 32,
             cpu_weight: 100,
-            cgroup_base: PathBuf::from(format!(
-                "/sys/fs/cgroup/user.slice/user-{uid}.slice"
-            )),
+            cgroup_base: PathBuf::from(format!("/sys/fs/cgroup/user.slice/user-{uid}.slice")),
         }
     }
 
@@ -267,12 +256,7 @@ mod corpus_containment {
 
         let sha256_path = corpus_sha256_path();
         let committed_digest = std::fs::read_to_string(&sha256_path)
-            .unwrap_or_else(|e| {
-                panic!(
-                    ".sha256 file not found ({}): {e}",
-                    sha256_path.display()
-                )
-            })
+            .unwrap_or_else(|e| panic!(".sha256 file not found ({}): {e}", sha256_path.display()))
             .trim()
             .to_owned();
 
@@ -339,21 +323,18 @@ mod corpus_containment {
         // alphabetical: samples < sha256 < version.
         let raw = r#"{"version":"v1","sha256":"","samples":[]}"#;
 
-        let mut root: serde_json::Value =
-            serde_json::from_str(raw).expect("fixed JSON must parse");
+        let mut root: serde_json::Value = serde_json::from_str(raw).expect("fixed JSON must parse");
 
         // Apply the blank-and-rehash convention (sha256 field is already blank
         // in this fixture, but we do it explicitly to mirror the real code path).
         root["sha256"] = serde_json::Value::String(String::new());
 
-        let canonical = serde_json::to_string(&root)
-            .expect("re-serialisation must succeed");
+        let canonical = serde_json::to_string(&root).expect("re-serialisation must succeed");
 
         // Assert the canonical form is exactly what we expect so the digest
         // constant is unambiguous.
         assert_eq!(
-            canonical,
-            r#"{"samples":[],"sha256":"","version":"v1"}"#,
+            canonical, r#"{"samples":[],"sha256":"","version":"v1"}"#,
             "serde_json key ordering changed — the canonicalization convention \
              is broken. Check whether preserve_order was enabled or serde_json \
              was upgraded with a serialisation behaviour change."
@@ -367,8 +348,7 @@ mod corpus_containment {
             "7cf5a0341f5574eea2aae5bbd34392cf3df87d9f0e6b3db3e08d4a6cb2de037e";
 
         assert_eq!(
-            digest,
-            EXPECTED_DIGEST,
+            digest, EXPECTED_DIGEST,
             "SHA-256 convention stability check failed.\n\
              canonical bytes : {canonical:?}\n\
              computed digest : {digest}\n\
@@ -402,10 +382,7 @@ mod corpus_containment {
         ];
 
         for category in &required_categories {
-            let found = corpus
-                .samples
-                .iter()
-                .any(|s| s.category == *category);
+            let found = corpus.samples.iter().any(|s| s.category == *category);
             assert!(
                 found,
                 "corpus is missing at least one sample with category {:?}; \
@@ -437,10 +414,7 @@ mod corpus_containment {
         // Sanity: valid expected_exit values.
         for sample in &corpus.samples {
             assert!(
-                matches!(
-                    sample.expected_exit.as_str(),
-                    "timeout" | "oom" | "denied"
-                ),
+                matches!(sample.expected_exit.as_str(), "timeout" | "oom" | "denied"),
                 "sample {:?} has unknown expected_exit {:?}; valid: timeout, oom, denied",
                 sample.id,
                 sample.expected_exit
@@ -540,7 +514,9 @@ mod corpus_containment {
                 "sample {:?} (category={:?}, expected_exit={:?}) exited Clean(0); \
                  adversarial code MUST NOT pass cleanly — the sandbox failed to \
                  contain it",
-                sample.id, sample.category, sample.expected_exit
+                sample.id,
+                sample.category,
+                sample.expected_exit
             );
 
             // ── (c) No survivors ─────────────────────────────────────────────
@@ -562,7 +538,8 @@ mod corpus_containment {
                         output.exit_status,
                         SandboxExitStatus::Timeout,
                         "sample {:?} expected Timeout, got {:?}",
-                        sample.id, output.exit_status
+                        sample.id,
+                        output.exit_status
                     );
                     assert!(
                         output.stats.cgroup_kill_event,
@@ -573,7 +550,8 @@ mod corpus_containment {
                         output.stats.time_to_contain_secs <= TIMEOUT_SECS + 1.0,
                         "sample {:?}: time_to_contain_secs {:.3} exceeds \
                          timeout_secs ({TIMEOUT_SECS}) + 1.0",
-                        sample.id, output.stats.time_to_contain_secs
+                        sample.id,
+                        output.stats.time_to_contain_secs
                     );
                 }
                 "oom" => {
@@ -581,7 +559,8 @@ mod corpus_containment {
                         output.exit_status,
                         SandboxExitStatus::OomKilled,
                         "sample {:?} expected OomKilled, got {:?}",
-                        sample.id, output.exit_status
+                        sample.id,
+                        output.exit_status
                     );
                 }
                 "denied" => {
@@ -624,7 +603,8 @@ mod corpus_containment {
                          not run to the timeout wall. Either the sample is \
                          miscategorised or the seccomp policy is not blocking \
                          the syscall.",
-                        sample.id, sample.category
+                        sample.id,
+                        sample.category
                     );
                 }
                 other => {

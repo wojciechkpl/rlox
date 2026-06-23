@@ -12,9 +12,5 @@ use crate::error::RlOpsError;
 /// - **Free of autograd operations**: this crate has no tensor/gradient deps.
 /// - **Thread-safe**: `Send + Sync` so the estimator can live inside `Arc`.
 pub trait AdvantageEstimator: Send + Sync {
-    fn compute(
-        &self,
-        rewards: &[f32],
-        group_size: usize,
-    ) -> Result<Vec<f32>, RlOpsError>;
+    fn compute(&self, rewards: &[f32], group_size: usize) -> Result<Vec<f32>, RlOpsError>;
 }

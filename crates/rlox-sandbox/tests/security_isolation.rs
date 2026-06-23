@@ -53,9 +53,7 @@ mod security_isolation {
 
     fn cgroup_base() -> PathBuf {
         let uid = unsafe { libc::getuid() };
-        PathBuf::from(format!(
-            "/sys/fs/cgroup/user.slice/user-{uid}.slice"
-        ))
+        PathBuf::from(format!("/sys/fs/cgroup/user.slice/user-{uid}.slice"))
     }
 
     /// Short-timeout config for containment-sensitive tests.
@@ -249,7 +247,10 @@ assert 1 == 99, "mathematical impossibility that must always fail"
     #[tokio::test]
     async fn test_no_persistent_host_tmp_writes() {
         // Use a UUID-derived unique marker so parallel test runs don't collide.
-        let marker_name = format!("rlox_escape_marker_{}", Uuid::new_v4().to_string().replace('-', ""));
+        let marker_name = format!(
+            "rlox_escape_marker_{}",
+            Uuid::new_v4().to_string().replace('-', "")
+        );
         let marker_path_str = format!("/tmp/{marker_name}");
 
         let code = format!(
@@ -425,10 +426,7 @@ sys.exit(0)
         // "SOCKET_FD <n>" in stdout where n >= 0 means seccomp was silent.
         let socket_succeeded = stdout.lines().any(|line| {
             if let Some(rest) = line.strip_prefix("SOCKET_FD ") {
-                rest.trim()
-                    .parse::<i64>()
-                    .map(|n| n >= 0)
-                    .unwrap_or(false)
+                rest.trim().parse::<i64>().map(|n| n >= 0).unwrap_or(false)
             } else {
                 false
             }

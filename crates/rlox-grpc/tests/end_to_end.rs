@@ -1,42 +1,42 @@
-/// rlox-grpc end-to-end integration tests (RED phase)
-///
-/// ## What this file pins
-///
-/// 1. **Smoke coverage** — there are ZERO existing tests for this crate.
-///    The first three tests establish a baseline: start an in-process tonic
-///    server, connect `RemoteEnvClient`, call `reset_batch` + `step_batch`, and
-///    assert that the returned shapes are correct.  These should PASS once the
-///    server/client wiring is working correctly; they are RED today only because
-///    the crate has no tests at all.
-///
-/// 2. **terminal_obs bug** — `client.rs:59` hardcodes
-///    `terminal_obs: vec![None; num_envs]` regardless of whether any environment
-///    reached a terminal state.  `test_step_batch_terminal_obs_transmitted` drives
-///    CartPole to termination and asserts that the corresponding `terminal_obs[i]`
-///    is `Some(_)`.  With the current implementation this assertion FAILS because
-///    `terminal_obs` is always `None`.
-///
-/// ## Construction assumptions the implementer must honor
-///
-///   - `EnvWorker::new(VecEnv)` — exact signature as in `server.rs`.
-///   - `proto::env_service_server::EnvServiceServer::new(worker)` wraps the
-///     worker into a tonic service.
-///   - `tonic::transport::Server::builder().add_service(svc).serve(addr)` binds
-///     and serves.
-///   - `RemoteEnvClient::connect("http://127.0.0.1:<port>")` connects.
-///   - `VecEnv::new(Vec<Box<dyn RLEnv>>)` — creates the vectorized environment.
-///   - `CartPole::new(Some(seed))` — creates a seeded CartPole.
-///   - CartPole obs dim = 4; action space = Discrete(2).
-///   - CartPole terminates (pole falls) when always stepping with action=1,
-///     typically within ~20-80 steps from the initial reset.
-///
-/// ## Test runner
-///
-///   cargo test -p rlox-grpc
-///
-///   Each async test uses `#[tokio::test]`.  The tokio runtime is available via
-///   the `tokio = { features = ["full"] }` dependency already declared in
-///   `Cargo.toml` (no `[dev-dependencies]` change needed).
+//! rlox-grpc end-to-end integration tests (RED phase)
+//!
+//! ## What this file pins
+//!
+//! 1. **Smoke coverage** — there are ZERO existing tests for this crate.
+//!    The first three tests establish a baseline: start an in-process tonic
+//!    server, connect `RemoteEnvClient`, call `reset_batch` + `step_batch`, and
+//!    assert that the returned shapes are correct.  These should PASS once the
+//!    server/client wiring is working correctly; they are RED today only because
+//!    the crate has no tests at all.
+//!
+//! 2. **terminal_obs bug** — `client.rs:59` hardcodes
+//!    `terminal_obs: vec![None; num_envs]` regardless of whether any environment
+//!    reached a terminal state.  `test_step_batch_terminal_obs_transmitted` drives
+//!    CartPole to termination and asserts that the corresponding `terminal_obs[i]`
+//!    is `Some(_)`.  With the current implementation this assertion FAILS because
+//!    `terminal_obs` is always `None`.
+//!
+//! ## Construction assumptions the implementer must honor
+//!
+//!   - `EnvWorker::new(VecEnv)` — exact signature as in `server.rs`.
+//!   - `proto::env_service_server::EnvServiceServer::new(worker)` wraps the
+//!     worker into a tonic service.
+//!   - `tonic::transport::Server::builder().add_service(svc).serve(addr)` binds
+//!     and serves.
+//!   - `RemoteEnvClient::connect("http://127.0.0.1:<port>")` connects.
+//!   - `VecEnv::new(Vec<Box<dyn RLEnv>>)` — creates the vectorized environment.
+//!   - `CartPole::new(Some(seed))` — creates a seeded CartPole.
+//!   - CartPole obs dim = 4; action space = Discrete(2).
+//!   - CartPole terminates (pole falls) when always stepping with action=1,
+//!     typically within ~20-80 steps from the initial reset.
+//!
+//! ## Test runner
+//!
+//!   cargo test -p rlox-grpc
+//!
+//!   Each async test uses `#[tokio::test]`.  The tokio runtime is available via
+//!   the `tokio = { features = ["full"] }` dependency already declared in
+//!   `Cargo.toml` (no `[dev-dependencies]` change needed).
 
 use std::net::TcpListener;
 use std::time::Duration;

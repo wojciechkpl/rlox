@@ -180,7 +180,7 @@ mod tests {
         let images: Vec<f32> = (0..16).map(|i| i as f32 / 15.0).collect();
         let output = random_shift_batch(&images, 1, 1, 4, 4, 2, 42).unwrap();
         for &v in &output {
-            assert!(v >= 0.0 && v <= 1.0, "value out of bounds: {v}");
+            assert!((0.0..=1.0).contains(&v), "value out of bounds: {v}");
         }
     }
 
@@ -282,7 +282,7 @@ mod tests {
                 let output = random_shift_batch(&images, b, c, h, w, 2, 42).unwrap();
                 for &v in &output {
                     // Values are either from the original image or zero (padding)
-                    prop_assert!(v >= 0.0 && v <= 1.0,
+                    prop_assert!((0.0..=1.0).contains(&v),
                         "value {v} not in [0.0, 1.0], min_val={min_val}");
                 }
             }

@@ -119,10 +119,8 @@ impl RLEnv for CartPole {
         self.state = [new_x, new_x_dot, new_theta, new_theta_dot];
         self.steps += 1;
 
-        let terminated = new_x < -X_THRESHOLD
-            || new_x > X_THRESHOLD
-            || new_theta < -THETA_THRESHOLD
-            || new_theta > THETA_THRESHOLD;
+        let terminated = !(-X_THRESHOLD..=X_THRESHOLD).contains(&new_x)
+            || !(-THETA_THRESHOLD..=THETA_THRESHOLD).contains(&new_theta);
 
         let truncated = !terminated && self.steps >= MAX_STEPS;
 
@@ -670,10 +668,8 @@ impl RLEnv for NonStationaryCartPole {
         self.steps += 1;
         self.global_step += 1;
 
-        let terminated = new_x < -X_THRESHOLD
-            || new_x > X_THRESHOLD
-            || new_theta < -THETA_THRESHOLD
-            || new_theta > THETA_THRESHOLD;
+        let terminated = !(-X_THRESHOLD..=X_THRESHOLD).contains(&new_x)
+            || !(-THETA_THRESHOLD..=THETA_THRESHOLD).contains(&new_theta);
 
         let truncated = !terminated && self.steps >= MAX_STEPS;
         self.done = terminated || truncated;

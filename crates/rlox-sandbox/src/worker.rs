@@ -176,11 +176,7 @@ extern "C" fn spawn_child_fn(arg: *mut libc::c_void) -> libc::c_int {
 
         // Wait for parent to write uid/gid maps.
         let mut ack: u8 = 0;
-        libc::read(
-            args.sync_p2c_r,
-            &mut ack as *mut u8 as *mut libc::c_void,
-            1,
-        );
+        libc::read(args.sync_p2c_r, &mut ack as *mut u8 as *mut libc::c_void, 1);
         libc::close(args.sync_p2c_r);
 
         // Make mount namespace private (prevents propagation to host).
@@ -302,11 +298,7 @@ pub fn spawn_in_namespaces() -> Result<NamespaceChildResult, SandboxError> {
     // Wait for child's "clone done" signal.
     unsafe {
         let mut byte: u8 = 0;
-        libc::read(
-            sync_c2p[0],
-            &mut byte as *mut u8 as *mut libc::c_void,
-            1,
-        );
+        libc::read(sync_c2p[0], &mut byte as *mut u8 as *mut libc::c_void, 1);
         libc::close(sync_c2p[0]);
     }
 
@@ -320,11 +312,7 @@ pub fn spawn_in_namespaces() -> Result<NamespaceChildResult, SandboxError> {
     // Signal child: "maps written."
     unsafe {
         let byte: u8 = 1;
-        libc::write(
-            sync_p2c[1],
-            &byte as *const u8 as *const libc::c_void,
-            1,
-        );
+        libc::write(sync_p2c[1], &byte as *const u8 as *const libc::c_void, 1);
         libc::close(sync_p2c[1]);
     }
 
@@ -433,11 +421,7 @@ extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
 
         // Wait for parent to write uid/gid maps.
         let mut ack: u8 = 0;
-        libc::read(
-            args.sync_p2c_r,
-            &mut ack as *mut u8 as *mut libc::c_void,
-            1,
-        );
+        libc::read(args.sync_p2c_r, &mut ack as *mut u8 as *mut libc::c_void, 1);
         libc::close(args.sync_p2c_r);
 
         // ── Bug A fix: Self-migrate into the cgroup leaf — MUST SUCCEED ──────
@@ -450,11 +434,7 @@ extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
         if cg_fd < 0 {
             // Could not open cgroup.procs — signal fatal setup failure.
             let code: u8 = SETUP_ERR_CGROUP_OPEN;
-            libc::write(
-                args.err_w,
-                &code as *const u8 as *const libc::c_void,
-                1,
-            );
+            libc::write(args.err_w, &code as *const u8 as *const libc::c_void, 1);
             libc::close(args.err_w);
             libc::_exit(1);
         }
@@ -464,11 +444,7 @@ extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
         if written < 0 {
             // Write to cgroup.procs failed — signal fatal setup failure.
             let code: u8 = SETUP_ERR_CGROUP_WRITE;
-            libc::write(
-                args.err_w,
-                &code as *const u8 as *const libc::c_void,
-                1,
-            );
+            libc::write(args.err_w, &code as *const u8 as *const libc::c_void, 1);
             libc::close(args.err_w);
             libc::_exit(1);
         }
@@ -518,10 +494,7 @@ extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
         // Without this, sandboxed code reading sys.stdin blocks indefinitely
         // (denial-of-service via stdin exhaustion of the sandbox timeout).
         let devnull_path = b"/dev/null\0";
-        let devnull_fd = libc::open(
-            devnull_path.as_ptr() as *const libc::c_char,
-            libc::O_RDONLY,
-        );
+        let devnull_fd = libc::open(devnull_path.as_ptr() as *const libc::c_char, libc::O_RDONLY);
         if devnull_fd >= 0 {
             libc::dup2(devnull_fd, 0);
             if devnull_fd > 0 {
@@ -577,19 +550,12 @@ extern "C" fn sandbox_child_fn(arg: *mut libc::c_void) -> libc::c_int {
 
         // Signal parent: setup OK.
         let code: u8 = SETUP_OK;
-        libc::write(
-            args.err_w,
-            &code as *const u8 as *const libc::c_void,
-            1,
-        );
+        libc::write(args.err_w, &code as *const u8 as *const libc::c_void, 1);
         libc::close(args.err_w);
 
         // exec python3 <script>
-        let argv: [*const libc::c_char; 3] = [
-            args.python_path_ptr,
-            args.script_path_ptr,
-            std::ptr::null(),
-        ];
+        let argv: [*const libc::c_char; 3] =
+            [args.python_path_ptr, args.script_path_ptr, std::ptr::null()];
         let envp: [*const libc::c_char; 2] = [args.path_env_ptr, std::ptr::null()];
         libc::execve(args.python_path_ptr, argv.as_ptr(), envp.as_ptr());
 
@@ -697,7 +663,12 @@ pub async fn run_sandboxed(
         let mut buf = [0u8; 16];
         // SAFETY: getrandom is safe; buf is a valid output buffer.
         let rc = unsafe {
-            libc::syscall(libc::SYS_getrandom, buf.as_mut_ptr() as *mut libc::c_void, 16usize, 0usize)
+            libc::syscall(
+                libc::SYS_getrandom,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                16usize,
+                0usize,
+            )
         };
         if rc != 16i64 {
             let _ = cgroup::destroy_leaf(&leaf_path);
@@ -765,18 +736,15 @@ pub async fn run_sandboxed(
     let uid = unsafe { libc::getuid() };
     let gid = unsafe { libc::getgid() };
 
-    let python_path_cstr = CString::new("/usr/bin/python3").map_err(|e| {
-        SandboxError::Spawn(format!("CString python path: {e}"))
-    })?;
+    let python_path_cstr = CString::new("/usr/bin/python3")
+        .map_err(|e| SandboxError::Spawn(format!("CString python path: {e}")))?;
     let script_path_str = script_path.to_string_lossy();
-    let script_cstr = CString::new(script_path_str.as_ref()).map_err(|e| {
-        SandboxError::Spawn(format!("CString script path: {e}"))
-    })?;
+    let script_cstr = CString::new(script_path_str.as_ref())
+        .map_err(|e| SandboxError::Spawn(format!("CString script path: {e}")))?;
     let cgroup_procs_path = leaf_path.join("cgroup.procs");
     let cgroup_procs_str = cgroup_procs_path.to_string_lossy();
-    let cgroup_procs_cstr = CString::new(cgroup_procs_str.as_ref()).map_err(|e| {
-        SandboxError::Spawn(format!("CString cgroup procs path: {e}"))
-    })?;
+    let cgroup_procs_cstr = CString::new(cgroup_procs_str.as_ref())
+        .map_err(|e| SandboxError::Spawn(format!("CString cgroup procs path: {e}")))?;
     let path_env = b"PATH=/usr/bin:/bin\0";
 
     let clone_args = SandboxCloneArgs {
@@ -841,11 +809,7 @@ pub async fn run_sandboxed(
     // Wait for child's "clone done" signal.
     unsafe {
         let mut byte: u8 = 0;
-        libc::read(
-            sync_c2p[0],
-            &mut byte as *mut u8 as *mut libc::c_void,
-            1,
-        );
+        libc::read(sync_c2p[0], &mut byte as *mut u8 as *mut libc::c_void, 1);
         libc::close(sync_c2p[0]);
     }
 
@@ -857,26 +821,38 @@ pub async fn run_sandboxed(
     let _ = fs::write(format!("/proc/{child_pid}/setgroups"), "deny");
     if let Err(e) = fs::write(format!("/proc/{child_pid}/uid_map"), &uid_map) {
         // Signal the child to abort (close the write end; child will get EOF).
-        unsafe { libc::close(sync_p2c[1]); }
+        unsafe {
+            libc::close(sync_p2c[1]);
+        }
         unsafe {
             let mut status: i32 = 0;
             libc::waitpid(child_pid, &mut status as *mut i32, 0);
         }
-        unsafe { libc::close(err_pipe[0]); }
-        unsafe { libc::close(stdout_pipe[0]); }
+        unsafe {
+            libc::close(err_pipe[0]);
+        }
+        unsafe {
+            libc::close(stdout_pipe[0]);
+        }
         let _ = fs::remove_dir_all(&script_dir);
         let _ = cgroup::destroy_leaf(&leaf_path);
         return Err(SandboxError::Namespace(format!("write uid_map: {e}")));
     }
     // F5 — Propagate gid_map write failure (symmetric with uid_map handling).
     if let Err(e) = fs::write(format!("/proc/{child_pid}/gid_map"), &gid_map) {
-        unsafe { libc::close(sync_p2c[1]); }
+        unsafe {
+            libc::close(sync_p2c[1]);
+        }
         unsafe {
             let mut status: i32 = 0;
             libc::waitpid(child_pid, &mut status as *mut i32, 0);
         }
-        unsafe { libc::close(err_pipe[0]); }
-        unsafe { libc::close(stdout_pipe[0]); }
+        unsafe {
+            libc::close(err_pipe[0]);
+        }
+        unsafe {
+            libc::close(stdout_pipe[0]);
+        }
         let _ = fs::remove_dir_all(&script_dir);
         let _ = cgroup::destroy_leaf(&leaf_path);
         return Err(SandboxError::Namespace(format!("write gid_map: {e}")));
@@ -888,11 +864,7 @@ pub async fn run_sandboxed(
     // via err_pipe before exec.
     unsafe {
         let byte: u8 = 1;
-        libc::write(
-            sync_p2c[1],
-            &byte as *const u8 as *const libc::c_void,
-            1,
-        );
+        libc::write(sync_p2c[1], &byte as *const u8 as *const libc::c_void, 1);
         libc::close(sync_p2c[1]);
     }
 
@@ -903,11 +875,7 @@ pub async fn run_sandboxed(
     // 255/EOF = unknown child crash before writing
     let child_setup_code = unsafe {
         let mut code: u8 = 255;
-        libc::read(
-            err_pipe[0],
-            &mut code as *mut u8 as *mut libc::c_void,
-            1,
-        );
+        libc::read(err_pipe[0], &mut code as *mut u8 as *mut libc::c_void, 1);
         libc::close(err_pipe[0]);
         code
     };
@@ -918,7 +886,9 @@ pub async fn run_sandboxed(
             libc::waitpid(child_pid, &mut status as *mut i32, 0);
         }
         // Bug A fix: close stdout_pipe[0] — previously leaked on this path.
-        unsafe { libc::close(stdout_pipe[0]); }
+        unsafe {
+            libc::close(stdout_pipe[0]);
+        }
         let _ = fs::remove_dir_all(&script_dir);
         let _ = cgroup::destroy_leaf(&leaf_path);
         let reason = match child_setup_code {
@@ -991,13 +961,11 @@ pub async fn run_sandboxed(
 
         // Bug A fix: bounded waitpid after kill — poll with WNOHANG up to a
         // deadline so a rare kill failure never hangs run_sandboxed forever.
-        let reap_deadline = Instant::now()
-            + std::time::Duration::from_millis(KILL_REAP_DEADLINE_MS);
+        let reap_deadline =
+            Instant::now() + std::time::Duration::from_millis(KILL_REAP_DEADLINE_MS);
         loop {
             let mut status: i32 = 0;
-            let wp = unsafe {
-                libc::waitpid(child_pid, &mut status as *mut i32, libc::WNOHANG)
-            };
+            let wp = unsafe { libc::waitpid(child_pid, &mut status as *mut i32, libc::WNOHANG) };
             if wp == child_pid || wp < 0 {
                 break;
             }
@@ -1129,8 +1097,7 @@ fn validate_cgroup_base(config: &SandboxConfig) -> Result<(), SandboxError> {
         let uid = unsafe { libc::getuid() };
         let gid = unsafe { libc::getgid() };
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
-        let path_cstr = std::ffi::CString::new(base.to_string_lossy().as_ref())
-            .unwrap_or_default();
+        let path_cstr = std::ffi::CString::new(base.to_string_lossy().as_ref()).unwrap_or_default();
         let stat_ok = unsafe { libc::stat(path_cstr.as_ptr(), &mut st) } == 0;
         if stat_ok {
             let mode = st.st_mode;
@@ -1289,9 +1256,7 @@ fn parse_sentinel_pass_rate(stdout: &str, nonce: &str) -> f32 {
             // rest = "<passed>:<total>"
             let mut parts = rest.splitn(2, ':');
             if let (Some(passed_s), Some(total_s)) = (parts.next(), parts.next()) {
-                if let (Ok(passed), Ok(total)) =
-                    (passed_s.parse::<u32>(), total_s.parse::<u32>())
-                {
+                if let (Ok(passed), Ok(total)) = (passed_s.parse::<u32>(), total_s.parse::<u32>()) {
                     if total == 0 {
                         return 0.0;
                     }

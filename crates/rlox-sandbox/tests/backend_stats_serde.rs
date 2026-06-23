@@ -23,7 +23,6 @@
 ///
 /// All tests FAIL until `BackendStats` has the `setup_error_events: u32` field
 /// added to both the Rust struct and the Python `BackendStats` dataclass.
-
 use rlox_sandbox::BackendStats;
 
 // ---------------------------------------------------------------------------
@@ -282,11 +281,11 @@ fn test_backend_stats_rust_to_python_round_trip() {
     // Locate stats.py relative to the workspace root.
     // On wk-system the repo is at /home/wk/rlox; detect via the CARGO_MANIFEST_DIR
     // env var (set by cargo during test compilation) and walk up to the repo root.
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR must be set by cargo");
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set by cargo");
     // manifest_dir = <repo_root>/crates/rlox-sandbox
     let repo_root = PathBuf::from(&manifest_dir)
-        .parent()   // crates/
+        .parent() // crates/
         .and_then(|p| p.parent()) // repo_root/
         .expect("could not locate repo root from CARGO_MANIFEST_DIR")
         .to_path_buf();

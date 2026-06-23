@@ -44,8 +44,8 @@ mod namespace_tests {
     fn test_spawn_in_namespaces_child_sees_different_pid_ns() {
         let parent_ns = parent_pid_ns();
 
-        let result = spawn_in_namespaces()
-            .expect("spawn_in_namespaces should not error on wk-system");
+        let result =
+            spawn_in_namespaces().expect("spawn_in_namespaces should not error on wk-system");
 
         assert_eq!(
             result.exit_code, 0,
@@ -69,18 +69,16 @@ mod namespace_tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_spawn_in_namespaces_mount_does_not_propagate_to_host() {
-        let mounts_before =
-            fs::read_to_string("/proc/mounts").expect("read /proc/mounts before");
+        let mounts_before = fs::read_to_string("/proc/mounts").expect("read /proc/mounts before");
 
         // spawn_in_namespaces is a stub; if it panics the test fails for the
         // right reason (missing implementation).
-        let result = spawn_in_namespaces()
-            .expect("spawn_in_namespaces should not error on wk-system");
+        let result =
+            spawn_in_namespaces().expect("spawn_in_namespaces should not error on wk-system");
 
         assert_eq!(result.exit_code, 0, "child should exit clean");
 
-        let mounts_after =
-            fs::read_to_string("/proc/mounts").expect("read /proc/mounts after");
+        let mounts_after = fs::read_to_string("/proc/mounts").expect("read /proc/mounts after");
 
         let lines_before = mounts_before.lines().count();
         let lines_after = mounts_after.lines().count();
@@ -99,8 +97,7 @@ mod namespace_tests {
     #[test]
     fn test_spawn_in_namespaces_is_repeatable() {
         for i in 0..2 {
-            let result = spawn_in_namespaces()
-                .unwrap_or_else(|e| panic!("call {i} failed: {e}"));
+            let result = spawn_in_namespaces().unwrap_or_else(|e| panic!("call {i} failed: {e}"));
             assert_eq!(result.exit_code, 0, "call {i}: child exit code should be 0");
         }
     }

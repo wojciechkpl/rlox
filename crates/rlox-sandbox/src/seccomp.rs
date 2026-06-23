@@ -18,7 +18,10 @@
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 
-use seccompiler::{BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter, SeccompRule, TargetArch};
+use seccompiler::{
+    BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter,
+    SeccompRule, TargetArch,
+};
 
 use crate::error::SandboxError;
 
@@ -192,8 +195,8 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_get_robust_list,
         // --- misc kernel interfaces Python needs ---
         libc::SYS_arch_prctl,
-        libc::SYS_prctl,         // Python uses prctl; we leave it open here and
-                                  // rely on namespace isolation for privilege constraints
+        libc::SYS_prctl, // Python uses prctl; we leave it open here and
+        // rely on namespace isolation for privilege constraints
         libc::SYS_uname,
         libc::SYS_sysinfo,
         libc::SYS_getrandom,
@@ -273,10 +276,10 @@ pub fn build_filter() -> Result<Vec<u8>, SandboxError> {
     // MaskedEq(mask): allow clone only when (arg0 & CLONE_NEWUSER) == 0.
     // Any call with CLONE_NEWUSER set fails to match and gets mismatch_action = Errno(EPERM).
     let clone_newuser_not_set = SeccompCondition::new(
-        0,                                   // arg index 0 = flags (unsigned long, 64-bit)
-        SeccompCmpArgLen::Qword,             // full 64-bit comparison
+        0,                                     // arg index 0 = flags (unsigned long, 64-bit)
+        SeccompCmpArgLen::Qword,               // full 64-bit comparison
         SeccompCmpOp::MaskedEq(CLONE_NEWUSER), // (flags & CLONE_NEWUSER) must equal...
-        0,                                   // ...0, meaning CLONE_NEWUSER bit is NOT set
+        0,                                     // ...0, meaning CLONE_NEWUSER bit is NOT set
     )
     .map_err(|e| SandboxError::Seccomp(format!("SeccompCondition for clone: {e}")))?;
 
@@ -307,11 +310,7 @@ pub fn build_filter() -> Result<Vec<u8>, SandboxError> {
     // SAFETY: sock_filter is #[repr(C)] with no padding at its size boundary;
     // the cast to *const u8 is valid for the lifetime of `program`.
     unsafe {
-        std::ptr::copy_nonoverlapping(
-            program.as_ptr() as *const u8,
-            bytes.as_mut_ptr(),
-            byte_len,
-        );
+        std::ptr::copy_nonoverlapping(program.as_ptr() as *const u8, bytes.as_mut_ptr(), byte_len);
     }
     Ok(bytes)
 }

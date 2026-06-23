@@ -68,9 +68,7 @@ fn parse_args() -> Result<Args, String> {
                 let v = raw
                     .get(i)
                     .ok_or_else(|| "--port requires a value".to_string())?;
-                args.port = v
-                    .parse::<u16>()
-                    .map_err(|e| format!("--port: {e}"))?;
+                args.port = v.parse::<u16>().map_err(|e| format!("--port: {e}"))?;
             }
             "--timeout-secs" => {
                 i += 1;
@@ -89,18 +87,14 @@ fn parse_args() -> Result<Args, String> {
                 let v = raw
                     .get(i)
                     .ok_or_else(|| "--mem-mb requires a value".to_string())?;
-                args.mem_mb = v
-                    .parse::<u64>()
-                    .map_err(|e| format!("--mem-mb: {e}"))?;
+                args.mem_mb = v.parse::<u64>().map_err(|e| format!("--mem-mb: {e}"))?;
             }
             "--pids-max" => {
                 i += 1;
                 let v = raw
                     .get(i)
                     .ok_or_else(|| "--pids-max requires a value".to_string())?;
-                args.pids_max = v
-                    .parse::<u32>()
-                    .map_err(|e| format!("--pids-max: {e}"))?;
+                args.pids_max = v.parse::<u32>().map_err(|e| format!("--pids-max: {e}"))?;
             }
             "--max-concurrent" => {
                 i += 1;

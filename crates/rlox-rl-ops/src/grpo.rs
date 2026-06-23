@@ -21,11 +21,7 @@ impl AdvantageEstimator for GroupRelativeEstimator {
     /// Groups are contiguous: `rewards[0..group_size]` is group 0, etc.
     ///
     /// Uses rayon parallel dispatch when `rewards.len() >= 4096` elements.
-    fn compute(
-        &self,
-        rewards: &[f32],
-        group_size: usize,
-    ) -> Result<Vec<f32>, RlOpsError> {
+    fn compute(&self, rewards: &[f32], group_size: usize) -> Result<Vec<f32>, RlOpsError> {
         compute_batch_group_advantages(rewards, group_size)
     }
 }
@@ -55,7 +51,9 @@ mod tests {
     fn advantage_estimator_trait_binary_rewards() {
         let estimator = GroupRelativeEstimator;
         let rewards = [1.0f32, 0.0, 1.0, 0.0];
-        let adv = estimator.compute(&rewards, 4).expect("compute must succeed");
+        let adv = estimator
+            .compute(&rewards, 4)
+            .expect("compute must succeed");
         assert_eq!(adv.len(), 4);
 
         let expected = [1.0f32, -1.0, 1.0, -1.0];
@@ -71,7 +69,9 @@ mod tests {
     fn advantage_estimator_trait_constant_group_returns_zeros() {
         let estimator = GroupRelativeEstimator;
         let rewards = [5.0f32, 5.0, 5.0, 5.0];
-        let adv = estimator.compute(&rewards, 4).expect("compute must succeed");
+        let adv = estimator
+            .compute(&rewards, 4)
+            .expect("compute must succeed");
         assert!(
             adv.iter().all(|&v| v == 0.0),
             "constant rewards must produce all-zero advantages"
@@ -83,7 +83,9 @@ mod tests {
         let estimator = GroupRelativeEstimator;
         // Two groups: [1,0,1,0] and [1,1,1,1]
         let rewards = [1.0f32, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0];
-        let adv = estimator.compute(&rewards, 4).expect("compute must succeed");
+        let adv = estimator
+            .compute(&rewards, 4)
+            .expect("compute must succeed");
         assert_eq!(adv.len(), 8);
         // First group: z-scored [+1, -1, +1, -1]
         assert!((adv[0] - 1.0).abs() < 1e-5);

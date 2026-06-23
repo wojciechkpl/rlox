@@ -42,10 +42,10 @@ mod server_contract_tests {
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
 
-    use axum::extract::State as AxumState;
-    use axum::{routing::post as axum_post, Json as AxumJson, Router as AxumRouter};
     use axum::body::Body;
+    use axum::extract::State as AxumState;
     use axum::http::{Request, StatusCode};
+    use axum::{routing::post as axum_post, Json as AxumJson, Router as AxumRouter};
     use http_body_util::BodyExt;
     use serde::{Deserialize, Serialize};
     use tokio::net::TcpListener;
@@ -275,8 +275,7 @@ mod server_contract_tests {
 
     #[tokio::test]
     async fn test_post_rollout_batch_returns_trajectory_per_completion() {
-        let vllm_addr =
-            start_mock_vllm(vec!["a = 1".to_string(), "b = 2".to_string()]).await;
+        let vllm_addr = start_mock_vllm(vec!["a = 1".to_string(), "b = 2".to_string()]).await;
 
         let group_size: u32 = 2;
         let tasks: Vec<RolloutTask> = (0..3_i32)
@@ -564,52 +563,49 @@ mod server_contract_tests {
         // Port 1 is reserved on Linux; connect(2) returns ECONNREFUSED immediately.
         // We wrap the whole test in a generous timeout (10 s) to guard against
         // unexpected blocking on unusual network configurations.
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            async {
-                let dead_vllm_url = "http://127.0.0.1:1";
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let dead_vllm_url = "http://127.0.0.1:1";
 
-                let config = ServerConfig {
-                    vllm_base_url: dead_vllm_url.to_string(),
-                    sandbox: SandboxRunConfig {
-                        mem_limit_bytes: 64 * 1024 * 1024,
-                        pids_limit: 8,
-                        cpu_weight: 100,
-                    },
-                    group_size: 1,
-                };
-                let app = router_with_config(config);
+            let config = ServerConfig {
+                vllm_base_url: dead_vllm_url.to_string(),
+                sandbox: SandboxRunConfig {
+                    mem_limit_bytes: 64 * 1024 * 1024,
+                    pids_limit: 8,
+                    cpu_weight: 100,
+                },
+                group_size: 1,
+            };
+            let app = router_with_config(config);
 
-                let req_body = RolloutRequest {
-                    tasks: vec![RolloutTask {
-                        job_id: Uuid::new_v4(),
-                        prompt_ids: vec![1i32, 2, 3],
-                        sampling_params: minimal_sampling_params(1),
-                        test_suite: "pass".to_string(),
-                        is_adversarial: false,
-                    }],
-                    group_size: 1,
-                    per_sample_timeout_secs: 5.0,
-                };
+            let req_body = RolloutRequest {
+                tasks: vec![RolloutTask {
+                    job_id: Uuid::new_v4(),
+                    prompt_ids: vec![1i32, 2, 3],
+                    sampling_params: minimal_sampling_params(1),
+                    test_suite: "pass".to_string(),
+                    is_adversarial: false,
+                }],
+                group_size: 1,
+                per_sample_timeout_secs: 5.0,
+            };
 
-                let http_request = Request::builder()
-                    .method("POST")
-                    .uri("/rollout")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-                    .unwrap();
+            let http_request = Request::builder()
+                .method("POST")
+                .uri("/rollout")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                .unwrap();
 
-                let response = app.oneshot(http_request).await.unwrap();
+            let response = app.oneshot(http_request).await.unwrap();
 
-                assert_eq!(
-                    response.status(),
-                    StatusCode::BAD_GATEWAY,
-                    "POST /rollout with unreachable vLLM must return HTTP 502 Bad Gateway, \
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_GATEWAY,
+                "POST /rollout with unreachable vLLM must return HTTP 502 Bad Gateway, \
                      not 200 with stub trajectories. \
                      The handler must remove the silent stub fallback and propagate the error."
-                );
-            },
-        )
+            );
+        })
         .await;
 
         result.expect(

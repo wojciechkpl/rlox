@@ -85,6 +85,8 @@ impl OfflineDatasetBuffer {
     /// Create from flat arrays.
     ///
     /// Arrays must be row-major: obs has length `n * obs_dim`, etc.
+    // Each parameter is a distinct flat array or dimension; grouping into a struct would complicate the Python FFI caller.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_arrays(
         obs: Vec<f32>,
         next_obs: Vec<f32>,

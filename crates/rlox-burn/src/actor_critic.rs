@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(result.log_probs.shape, vec![8]);
 
         for &a in &result.actions.data {
-            assert!(a >= 0.0 && a < 2.0, "action out of range: {a}");
+            assert!((0.0..2.0).contains(&a), "action out of range: {a}");
         }
         for &lp in &result.log_probs.data {
             assert!(lp <= 0.0, "log_prob should be <= 0: {lp}");

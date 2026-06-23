@@ -1,6 +1,6 @@
-/// Pure-Rust distribution utilities for CPU-based sampling and log-prob.
-/// These are backend-independent helpers that can be used by any backend
-/// or for testing without a NN framework.
+//! Pure-Rust distribution utilities for CPU-based sampling and log-prob.
+//! These are backend-independent helpers that can be used by any backend
+//! or for testing without a NN framework.
 
 /// Compute log(softmax(logits)) in a numerically stable way.
 /// Returns a vector of the same length as logits.

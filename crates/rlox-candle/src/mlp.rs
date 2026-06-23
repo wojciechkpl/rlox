@@ -94,7 +94,7 @@ mod tests {
         let output = mlp.forward(&input).unwrap();
         let data: Vec<f32> = output.flatten_all().unwrap().to_vec1().unwrap();
         for &v in &data {
-            assert!(v >= -1.0 && v <= 1.0, "tanh output out of range: {v}");
+            assert!((-1.0..=1.0).contains(&v), "tanh output out of range: {v}");
         }
     }
 }

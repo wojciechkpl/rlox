@@ -406,11 +406,8 @@ def add(a, b):
 
         // Wrap in a timeout so the test does not hang if the handler
         // accidentally blocks waiting on the dead vLLM endpoint.
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            oneshot_verify(req),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(15), oneshot_verify(req)).await;
 
         let (status, body) = result.expect(
             "test_verify_does_not_call_vllm timed out after 15 s — \
