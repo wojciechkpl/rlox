@@ -175,3 +175,36 @@ class SimpleQNetwork(nn.Module):
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.net(obs)
+
+
+class LayerNormQNetwork(nn.Module):
+    """LayerNorm-regularised MLP Q-network for PQN.
+
+    The load-bearing architectural ingredient of PQN (arXiv:2407.04811):
+    a LayerNorm is applied after each hidden linear layer, replacing the
+    need for a target network by stabilising the TD-learning fixed point.
+
+    Parameters
+    ----------
+    obs_dim : int
+        Flattened observation dimension.
+    act_dim : int
+        Number of discrete actions.
+    hidden : int
+        Hidden layer width (default 128).
+    """
+
+    def __init__(self, obs_dim: int, act_dim: int, hidden: int = 128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim, hidden),
+            nn.LayerNorm(hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.LayerNorm(hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, act_dim),
+        )
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.net(obs)

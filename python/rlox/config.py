@@ -1132,7 +1132,81 @@ class DTPConfig(ConfigMixin):
         _validate_positive("learning_rate_xgb", self.learning_rate_xgb)
 
 
-_VALID_ALGORITHMS = {"ppo", "sac", "dqn", "td3", "a2c", "mappo", "dreamer", "impala", "dt", "qmix", "calql", "trpo", "diffusion", "mpo", "rwdtp", "rcdtp"}
+@dataclass
+class PQNConfig(ConfigMixin):
+    """Configuration for PQN (Parallelised Q-Network) training.
+
+    Implements Gallici et al., arXiv:2407.04811.  PQN is value-based RL
+    with parallel envs, LayerNorm Q-net, Q(λ) returns, no target network,
+    and no replay buffer.
+
+    Attributes
+    ----------
+    n_envs : int
+        Number of parallel environments (default 8).
+    n_steps : int
+        Rollout length per environment per update (default 32).
+    learning_rate : float
+        Adam learning rate (default 2.5e-4).
+    gamma : float
+        Discount factor (default 0.99).
+    q_lambda : float
+        Lambda for Q(λ) / TD(λ) returns (default 0.65).
+    num_epochs : int
+        SGD epochs over each rollout (default 4).
+    num_minibatches : int
+        Number of minibatches per epoch (default 4).
+    max_grad_norm : float
+        Gradient clipping threshold (default 10.0).
+    weight_decay : float
+        Adam weight-decay / ℓ² regularisation (default 0.0).
+    hidden : int
+        Hidden layer width for the LayerNorm Q-network (default 128).
+    eps_start : float
+        Initial ε for ε-greedy exploration (default 1.0).
+    eps_end : float
+        Final ε after the exploration schedule (default 0.05).
+    exploration_fraction : float
+        Fraction of total_timesteps over which ε is linearly annealed
+        (default 0.5).
+    """
+
+    n_envs: int = 8
+    n_steps: int = 32
+    learning_rate: float = 2.5e-4
+    gamma: float = 0.99
+    q_lambda: float = 0.65
+    num_epochs: int = 4
+    num_minibatches: int = 4
+    max_grad_norm: float = 10.0
+    weight_decay: float = 0.0
+    hidden: int = 128
+    eps_start: float = 1.0
+    eps_end: float = 0.05
+    exploration_fraction: float = 0.5
+
+    def __post_init__(self) -> None:
+        _validate_positive("learning_rate", self.learning_rate)
+        _validate_min("n_envs", self.n_envs, 1)
+        _validate_min("n_steps", self.n_steps, 1)
+        _validate_min("num_epochs", self.num_epochs, 1)
+        _validate_min("num_minibatches", self.num_minibatches, 1)
+        _validate_positive("max_grad_norm", self.max_grad_norm)
+        _validate_min("hidden", self.hidden, 1)
+        if self.eps_start <= self.eps_end:
+            raise ValueError(
+                f"eps_start must be strictly greater than eps_end "
+                f"(got eps_start={self.eps_start}, eps_end={self.eps_end}). "
+                f"A non-decreasing ε schedule is a misconfiguration."
+            )
+        if not (0.0 < self.exploration_fraction <= 1.0):
+            raise ValueError(
+                f"exploration_fraction must be in (0.0, 1.0], "
+                f"got {self.exploration_fraction}."
+            )
+
+
+_VALID_ALGORITHMS = {"ppo", "sac", "dqn", "td3", "a2c", "mappo", "dreamer", "impala", "dt", "qmix", "calql", "trpo", "diffusion", "mpo", "rwdtp", "rcdtp", "pqn"}
 _VALID_LOGGERS = {"tensorboard", "wandb", "console", None}
 _VALID_CALLBACKS = {"eval", "checkpoint", "progress", "timing", "early_stopping"}
 
