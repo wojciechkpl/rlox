@@ -58,6 +58,7 @@ graph TD
 | [PPO](ppo.md) | Discrete / Continuous | Stochastic | Low | High | Low |
 | [TRPO](trpo.md) | Discrete / Continuous | Stochastic | Low | High | Medium |
 | [DQN](dqn.md) | Discrete only | Value-based | Medium | Medium | Low |
+| PQN | Discrete only | Value-based (LayerNorm, no target net / replay) | Medium | High | Low |
 | [TD3](td3.md) | Continuous only | Deterministic | High | High | Medium |
 | [SAC](sac.md) | Continuous | Stochastic | High | High | Medium |
 | [MPO](mpo.md) | Continuous | Stochastic | High | High | High |
@@ -87,7 +88,7 @@ status, exposed programmatically via `Trainer.status` and
 | Status | Meaning | Algorithms |
 |--------|---------|-----------|
 | **validated** | Convergence-tested with multi-seed Stable-Baselines3 parity | PPO, SAC, TD3, DQN, A2C |
-| **experimental** | Implemented and unit-tested, but **not** convergence-validated — APIs and results may change | TRPO, VPG, IMPALA, MAPPO, MPO, DreamerV3, QMIX, Cal-QL, Diffusion Policy, Decision Transformer, AWR, RWDTP/RCDTP |
+| **experimental** | Implemented and unit-tested, but **not** convergence-validated — APIs and results may change | TRPO, VPG, IMPALA, MAPPO, MPO, DreamerV3, QMIX, Cal-QL, Diffusion Policy, Decision Transformer, AWR, RWDTP/RCDTP, **PQN** |
 
 Offline-only (CQL, IQL, BC, TD3+BC) and LLM post-training (GRPO, DPO) algorithms
 are used through their own entry points rather than the `Trainer` registry; treat
