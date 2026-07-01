@@ -6,16 +6,22 @@ No torch, no rlox top-level package.
 `import rlox_agent.verifiers_adapter` itself does NOT import verifiers at
 module load time — the import happens inside `load_environment` so that
 `import rlox_agent` works without verifiers installed.
+
+Shared extraction helper
+------------------------
+``extract_python_code`` is the single-source implementation used by BOTH the
+TRL GRPO runner (``benchmarks/agentic/trl_grpo_run.py``) AND the
+``rlox_verify`` reward function.  Keeping one copy here prevents drift between
+the training and evaluation extraction paths.
 """
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any
-
-import httpx
 
 from rlox_agent import adversarial_corpus as _ac
 
@@ -80,6 +86,55 @@ def extract_text(messages: list[dict] | str) -> str:
 _extract_text = extract_text
 
 
+# ---------------------------------------------------------------------------
+# Code extraction (shared between trl_grpo_run and rlox_verify reward func)
+# ---------------------------------------------------------------------------
+
+# Compiled once at module load — cheap and avoids re-compiling per call.
+_FENCED_PYTHON = re.compile(r"```python\s*\n(.*?)```", re.DOTALL)
+_FENCED_GENERIC = re.compile(r"```\s*\n(.*?)```", re.DOTALL)
+
+
+def extract_python_code(text: str) -> str:
+    """Extract Python code from a model completion that may contain preamble text.
+
+    Extraction priority (first match wins):
+
+    1. Last ````python ... ```` fenced block.
+    2. Last ```` ``` ... ``` ```` fenced block (language-agnostic).
+    3. From the first ``def ``/``import ``/``from `` line to the end of the
+       string.
+    4. Original text unchanged (no preamble detected).
+
+    This function is intentionally applied ONLY to model completions.
+    Injected adversarial samples are raw, pre-validated code and must bypass
+    this function entirely (the adversarial branch in the reward functions
+    assigns ``code_text = task.code`` directly, never calling this function).
+    """
+    # 1. Try python-fenced block — take the last one in case the model emits
+    #    multiple (reasoning vs actual answer pattern).
+    python_matches = _FENCED_PYTHON.findall(text)
+    if python_matches:
+        return python_matches[-1].strip()
+
+    # 2. Try generic fenced block — also take the last one.
+    generic_matches = _FENCED_GENERIC.findall(text)
+    if generic_matches:
+        return generic_matches[-1].strip()
+
+    # 3. Fall back to the first def/import/from line.
+    for i, line in enumerate(text.splitlines()):
+        if (
+            line.startswith("def ")
+            or line.startswith("import ")
+            or line.startswith("from ")
+        ):
+            return "\n".join(text.splitlines()[i:]).strip()
+
+    # 4. Return as-is — no preamble markers found.
+    return text
+
+
 def run_in_loop(code: str, tests: str, timeout: float) -> float:
     """Execute *code* against *tests* in the current venv via subprocess.
 
@@ -123,6 +178,8 @@ def call_rlox_server(
     exception (which is logged as a WARNING so server outages are visible
     in training logs).
     """
+    import httpx  # lazy: not required for extract_python_code / run_in_loop paths
+
     url = f"{server_url}/verify"
     payload = {"code": code, "tests": tests, "is_adversarial": is_adversarial}
     try:
@@ -248,7 +305,9 @@ def load_environment(config: RloxVerifierConfig) -> "vf.Environment":  # noqa: F
             code_text = task.code
             tests_text = ""
         else:
-            code_text = extract_text(completion)
+            # Strip markdown fences so a chat model's ```python block is run as
+            # code, not verbatim prose (matches rlox_verify + trl_grpo_run).
+            code_text = extract_python_code(extract_text(completion))
             tests_text = answer if isinstance(answer, str) else extract_text(answer)
 
         if backend == "rlox":

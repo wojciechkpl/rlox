@@ -59,7 +59,12 @@ from rlox_agent.adversarial_corpus import (
     AdversarialInjector,
     AdversarialSample,
 )
-from rlox_agent.verifiers_adapter import call_rlox_server, extract_text, run_in_loop
+from rlox_agent.verifiers_adapter import (
+    call_rlox_server,
+    extract_python_code,
+    extract_text,
+    run_in_loop,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1010,7 +1015,7 @@ def load_environment(
             code_text = task.code
             tests_text = ""
         else:
-            code_text = extract_text(completion)
+            code_text = extract_python_code(extract_text(completion))
             # Prefer the ``tests`` kwarg (dataset column) over ``answer``.
             # Fall back to ``answer`` for backward compat when ``tests`` is
             # empty (e.g. old datasets that embed tests in the answer field).

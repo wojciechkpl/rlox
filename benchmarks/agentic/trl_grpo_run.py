@@ -65,7 +65,6 @@ import json
 import logging
 import os
 import random
-import re
 import subprocess
 import sys
 import threading
@@ -119,48 +118,13 @@ DEFAULT_ADVERSARIAL_CORPUS: Path = (
 
 
 # ---------------------------------------------------------------------------
-# Code extraction (FIX 2)
+# Code extraction (FIX 2) — canonical implementation in verifiers_adapter
 # ---------------------------------------------------------------------------
-
-# Regex patterns for fenced code blocks
-_FENCED_PYTHON = re.compile(r"```python\s*\n(.*?)```", re.DOTALL)
-_FENCED_GENERIC = re.compile(r"```\s*\n(.*?)```", re.DOTALL)
-
-
-def extract_python_code(text: str) -> str:
-    """Extract Python code from a model completion that may contain preamble text.
-
-    Extraction priority (first match wins):
-    1. Last ````python ... ```` fenced block.
-    2. Last ```` ``` ... ``` ```` fenced block (language-agnostic).
-    3. From the first ``def `` or ``import `` line to the end of the string.
-    4. Original text unchanged (no preamble detected).
-
-    This is intentionally applied only to model completions, NOT to injected
-    adversarial samples (those are raw, pre-validated code).
-    """
-    # 1. Try python-fenced block — take the last one in case the model emits
-    #    multiple (reasoning vs actual answer pattern).
-    python_matches = _FENCED_PYTHON.findall(text)
-    if python_matches:
-        return python_matches[-1].strip()
-
-    # 2. Try generic fenced block.
-    generic_matches = _FENCED_GENERIC.findall(text)
-    if generic_matches:
-        return generic_matches[-1].strip()
-
-    # 3. Fall back to first def/import line.
-    for i, line in enumerate(text.splitlines()):
-        if (
-            line.startswith("def ")
-            or line.startswith("import ")
-            or line.startswith("from ")
-        ):
-            return "\n".join(text.splitlines()[i:]).strip()
-
-    # 4. Return as-is — no preamble markers found.
-    return text
+# ``extract_python_code`` is imported from the shared single-source module so
+# that the TRL runner and the rlox_verify reward function always use identical
+# extraction logic.  The local definition and its fence regexes have been
+# removed; see ``python/rlox_agent/verifiers_adapter.py``.
+from rlox_agent.verifiers_adapter import extract_python_code  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
