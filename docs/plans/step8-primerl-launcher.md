@@ -139,3 +139,46 @@ gantt
 - **Reward field name drift** — parse `reward` per rollout row; fall back to `0.0` and log if absent.
 - **`tomli_w` dependency** — add to the agentic extra; keep `run_benchmark.py` importable without
   torch/vllm (constraint already enforced).
+
+---
+
+## Validation results (wk-system, single RTX 5090)
+
+**Launcher: validated.** `make_primerl_run_one` renders the per-run TOML, invokes `rl`, and
+correctly classifies outcomes. First probe returned `survived:false, completed_steps:0` in 7.6 s
+when prime-rl rejected the GPU count — the DNF path works.
+
+**Key finding — prime-rl's integrated `rl` launcher needs 2 GPUs.** `rl_local` assigns inference
+and the trainer *disjoint* physical GPUs (`total = num_infer_gpus + num_train_gpus`), so the
+integrated path floors at 2. This is exactly why the canonical study used the TRL fallback.
+
+**1-GPU decoupled recipe (built + working).** Run vLLM as an *external* server on GPU 0
+(`primerl/infer_1gpu.toml`) and omit `[inference]` from the trainer config
+(`primerl/smoke_1gpu.toml`, `inference=None` → `num_infer_gpus=0`, `num_train_gpus=1`, total=1),
+with the orchestrator pointed at it via `[orchestrator.client.elastic]`. Confirmed end-to-end:
+- **Colocation FITS** — inference ≈13.8 GiB + trainer coexist on one 32 GB 5090, no OOM.
+- **Seam connected** — prime-rl → `rlox_verify` → sandbox `/verify`, `dispatcher/errored/rlox-verify=0`;
+  a known-correct solution scores `reward=1.0` through `/verify`.
+
+**Two live-discovered launcher fixes (now in the code + regression-tested):**
+1. Inject `rlox_server_url` into `orchestrator.train.env[0].args` (else Treatment hits the env's
+   default `:8080` instead of the running verify server).
+2. Prepend the prime-rl venv `bin/` to `PATH` (its `rl` spawns `orchestrator`/`trainer` by bare
+   name; a direct-binary invocation otherwise can't resolve them).
+
+**Open follow-up — task calibration on the prime-rl host (NOT a launcher/seam defect).** The base
+Qwen3-4B scores 0 on every completion under prime-rl's `auto` renderer (both MBPP and the easy
+fallback), so zero within-group reward variance → the `zero_advantage` filter drops all rollouts →
+the orchestrator aborts after 10 consecutive empty batches. Same class as the documented
+"MBPP-too-hard → reward 0" caveat. Getting a learning curve / the quality-parity guardrail on
+prime-rl requires aligning the renderer/prompt/code-extraction (or an easier calibrated task) so
+the base model earns partial credit — tracked separately. The full multi-GPU P1 sweep remains a
+GCP follow-up.
+
+### Reproduce the 1-GPU decoupled smoke
+```bash
+# 1. servers (leave running)
+bash benchmarks/agentic/primerl/serve_1gpu.sh            # verify-server :8231 + inference :8000
+# 2. one launcher run / the smoke sweep
+python benchmarks/agentic/run_sweep_primerl.py           # base_toml = smoke_1gpu.toml
+```

@@ -9,8 +9,13 @@ Default parameters are sized for a single-GPU smoke on wk-system (RTX 5090):
   fractions=[0.0, 0.10] — clean baseline + high-injection Treatment pair.
   n_seeds=1 — minimal for smoke.
 
-Requires:
+Requires (single-GPU decoupled topology — see primerl/smoke_1gpu.toml):
   - rlox-verify-server running on SERVER_URL (Treatment runs call /verify).
+  - An external prime-rl inference server live on localhost:8000
+    (``inference @ primerl/infer_1gpu.toml``) — the base config omits
+    [inference] so ``rl`` runs only the trainer+orchestrator on GPU 0.
+    (The integrated ``rl`` launcher assigns inference+trainer disjoint GPUs,
+    so 1-GPU requires this external-inference topology.)
   - prime-rl venv at PRIME_RL_BIN with the ``rl`` entrypoint.
   - CUDA_VISIBLE_DEVICES will be set to "0" by the launcher.
 
@@ -36,7 +41,7 @@ MAX_STEPS = 8
 GROUP_SIZE = 4
 SERVER_URL = "http://localhost:8231"
 PRIME_RL_BIN = "/home/wk/prime-rl/.venv/bin/rl"
-BASE_TOML = str(REPO / "benchmarks" / "agentic" / "primerl" / "smoke.toml")
+BASE_TOML = str(REPO / "benchmarks" / "agentic" / "primerl" / "smoke_1gpu.toml")
 # Cap a single in_loop Baseline run so an adversarial-code stall can't block
 # the entire smoke for hours.  Passed directly to make_primerl_run_one.
 IN_LOOP_TIMEOUT_SECS = 1800  # 30 min/run

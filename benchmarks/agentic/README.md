@@ -73,8 +73,31 @@ python benchmarks/agentic/aggregate_sweep.py
 python benchmarks/agentic/plot_sweep.py --sweep-dir benchmarks/agentic/sweep_out --out-dir figures
 ```
 
-The GRPO trainer uses TRL (single-GPU colocation) because prime-rl's RL loop requires ≥2 GPUs;
-the sandbox / `/verify` / reward logic is host-agnostic (a prime-rl/verl adapter is future work).
+The GRPO trainer above uses TRL (single-GPU colocation) for the **canonical** P3 numbers.
+
+### Running on the prime-rl host (single-GPU, decoupled)
+
+`make_primerl_run_one` (`run_benchmark.py`) drives the benchmark's *locked* host, prime-rl +
+`verifiers`, end-to-end. prime-rl's integrated `rl` launcher assigns inference and the trainer
+**disjoint** GPUs (floor = 2 GPUs), so single-GPU uses a **decoupled** topology: an external vLLM
+server on GPU 0 plus a trainer config that omits `[inference]` (runs trainer+orchestrator on the
+same GPU, orchestrator pointed at the external server via an elastic client).
+
+```bash
+# 1. both servers on GPU 0 (verify-server :8231 + prime-rl inference :8000)
+bash benchmarks/agentic/primerl/serve_1gpu.sh
+
+# 2. one launcher run, or the smoke sweep (base_toml = primerl/smoke_1gpu.toml)
+python benchmarks/agentic/run_benchmark.py --host primerl \
+  --config benchmarks/agentic/configs/benchmark_v1.yaml --metric-store /tmp/ms
+python benchmarks/agentic/run_sweep_primerl.py
+```
+
+Validated on wk-system (1× RTX 5090): colocation fits (~13.8 GiB inference + trainer, no OOM) and
+the seam connects (prime-rl → `rlox_verify` → sandbox `/verify`, zero dispatch errors). A learning
+signal / the quality-parity guardrail on prime-rl needs task calibration under prime-rl's renderer
+(see the "reward 0" caveat below); the multi-GPU P1 sweep is a GCP follow-up. Full write-up in
+`docs/plans/step8-primerl-launcher.md`.
 
 ## Scope & caveats (read before citing)
 

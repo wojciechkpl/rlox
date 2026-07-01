@@ -201,6 +201,7 @@ def _render_run_toml(
     seed: int,
     fraction: float,
     max_steps: int,
+    rlox_server_url: str,
 ) -> Path:
     """Deep-merge base TOML with per-run overrides and write ``run_dir/rl.gen.toml``.
 
@@ -209,6 +210,9 @@ def _render_run_toml(
     - ``max_steps`` = max_steps
     - ``orchestrator.train.env[0].args.rollout_backend`` = condition
     - ``orchestrator.train.env[0].args.adversarial_fraction`` = fraction
+    - ``orchestrator.train.env[0].args.rlox_server_url`` = rlox_server_url
+      (points the Treatment ``rlox`` backend at the running verify server
+      instead of the env's built-in default; harmless for the ``in_loop`` Baseline)
     - ``wandb.name`` = per-run label encoding condition / seed / fraction
 
     All unrelated base keys are preserved.
@@ -230,6 +234,7 @@ def _render_run_toml(
         merged_args = dict(merged_env0.get("args", {}))
         merged_args["rollout_backend"] = condition
         merged_args["adversarial_fraction"] = fraction
+        merged_args["rlox_server_url"] = rlox_server_url
         merged_env0["args"] = merged_args
         new_envs = [merged_env0, *base_envs[1:]]
     else:
@@ -370,7 +375,13 @@ def make_primerl_run_one(
         # Render per-run TOML before launching the subprocess.
         try:
             toml_path = _render_run_toml(
-                _base_toml, run_dir, condition, seed, fraction, max_steps
+                _base_toml,
+                run_dir,
+                condition,
+                seed,
+                fraction,
+                max_steps,
+                rlox_server_url,
             )
         except Exception as exc:
             logger.error(
@@ -412,6 +423,13 @@ def make_primerl_run_one(
 
         env = dict(os.environ)
         env["CUDA_VISIBLE_DEVICES"] = "0"
+        # The prime-rl ``rl`` launcher spawns its child ``orchestrator`` /
+        # ``trainer`` entrypoints by bare command name (resolved via PATH). When
+        # ``rl`` is invoked by absolute path (not ``uv run``), its venv bin dir is
+        # not on PATH, so prepend it so the children resolve.
+        _bin_dir = os.path.dirname(_prime_rl_bin)
+        if _bin_dir:
+            env["PATH"] = _bin_dir + os.pathsep + env.get("PATH", "")
 
         t0 = time.monotonic()
         try:

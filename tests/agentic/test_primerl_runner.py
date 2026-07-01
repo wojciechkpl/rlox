@@ -52,7 +52,6 @@ import json
 import os
 import stat
 import subprocess
-import sys
 import textwrap
 import tomllib
 from pathlib import Path
@@ -1138,7 +1137,7 @@ class TestExceptionResilience:
 
         with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
             try:
-                result = run_one("rlox", 0, 0.0)
+                run_one("rlox", 0, 0.0)
             except Exception as exc:
                 pytest.fail(f"run_one propagated an exception: {exc!r}")
 
@@ -1178,6 +1177,329 @@ class TestRunSweepCompatibility:
         assert len(results) == 2  # 2 conditions × 1 seed × 1 fraction
         for r in results:
             assert "survived" in r
+
+
+# ---------------------------------------------------------------------------
+# K1) rlox_server_url is threaded into the rendered TOML env args
+#
+# Regression: _render_run_toml gained a `rlox_server_url` param that sets
+# orchestrator.train.env[0].args.rlox_server_url in the generated rl.gen.toml.
+# Existing rollout_backend / adversarial_fraction overrides must be unaffected.
+# ---------------------------------------------------------------------------
+
+class TestServerUrlInToml:
+    """rlox_server_url must appear in the rendered rl.gen.toml env[0].args,
+    unconditionally for both condition='rlox' and condition='in_loop'."""
+
+    @pytest.mark.parametrize("condition", ["rlox", "in_loop"])
+    def test_gen_toml_sets_rlox_server_url(
+        self,
+        condition: str,
+        base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path,
+    ):
+        """rlox_server_url value passed to make_primerl_run_one must appear in rl.gen.toml."""
+        expected_url = "http://localhost:9999"
+        run_one = make_primerl_run_one(
+            base_toml=str(base_toml),
+            max_steps=1,
+            group_size=4,
+            rlox_server_url=expected_url,
+            prime_rl_bin=str(prime_rl_bin),
+            output_root=str(tmp_path),
+            repo_root=str(repo_root),
+            scope_for_baseline=False,
+            in_loop_timeout_secs=60,
+        )
+        captured_toml_paths: list[str] = []
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                captured_toml_paths.append(p)
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one(condition, 0, 0.0)
+
+        assert captured_toml_paths, "subprocess.run was never called"
+        toml_data = _read_gen_toml(captured_toml_paths[0])
+        actual_url = toml_data["orchestrator"]["train"]["env"][0]["args"]["rlox_server_url"]
+        assert actual_url == expected_url, (
+            f"rlox_server_url in rl.gen.toml: {actual_url!r} != {expected_url!r}"
+        )
+
+    def test_gen_toml_server_url_does_not_clobber_rollout_backend(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """Setting rlox_server_url must not overwrite rollout_backend in env[0].args."""
+        run_one = make_primerl_run_one(
+            base_toml=str(base_toml),
+            max_steps=1,
+            group_size=4,
+            rlox_server_url="http://localhost:7777",
+            prime_rl_bin=str(prime_rl_bin),
+            output_root=str(tmp_path),
+            repo_root=str(repo_root),
+            scope_for_baseline=False,
+            in_loop_timeout_secs=60,
+        )
+        captured_toml_paths: list[str] = []
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                captured_toml_paths.append(p)
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("rlox", 0, 0.0)
+
+        toml_data = _read_gen_toml(captured_toml_paths[0])
+        args = toml_data["orchestrator"]["train"]["env"][0]["args"]
+        assert args["rollout_backend"] == "rlox"
+        assert args["rlox_server_url"] == "http://localhost:7777"
+
+    def test_gen_toml_server_url_does_not_clobber_adversarial_fraction(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """Setting rlox_server_url must not overwrite adversarial_fraction in env[0].args."""
+        run_one = make_primerl_run_one(
+            base_toml=str(base_toml),
+            max_steps=1,
+            group_size=4,
+            rlox_server_url="http://localhost:7777",
+            prime_rl_bin=str(prime_rl_bin),
+            output_root=str(tmp_path),
+            repo_root=str(repo_root),
+            scope_for_baseline=False,
+            in_loop_timeout_secs=60,
+        )
+        captured_toml_paths: list[str] = []
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                captured_toml_paths.append(p)
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("rlox", 0, 0.15)
+
+        toml_data = _read_gen_toml(captured_toml_paths[0])
+        args = toml_data["orchestrator"]["train"]["env"][0]["args"]
+        assert args["adversarial_fraction"] == pytest.approx(0.15)
+        assert args["rlox_server_url"] == "http://localhost:7777"
+
+    def test_gen_toml_all_three_env_args_set_together(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """All three overrides — rollout_backend, adversarial_fraction, rlox_server_url —
+        must be present simultaneously in env[0].args."""
+        server_url = "http://verify.local:8231"
+        run_one = make_primerl_run_one(
+            base_toml=str(base_toml),
+            max_steps=1,
+            group_size=4,
+            rlox_server_url=server_url,
+            prime_rl_bin=str(prime_rl_bin),
+            output_root=str(tmp_path),
+            repo_root=str(repo_root),
+            scope_for_baseline=False,
+            in_loop_timeout_secs=60,
+        )
+        captured_toml_paths: list[str] = []
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                captured_toml_paths.append(p)
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("in_loop", 2, 0.10)
+
+        toml_data = _read_gen_toml(captured_toml_paths[0])
+        args = toml_data["orchestrator"]["train"]["env"][0]["args"]
+        assert args["rollout_backend"] == "in_loop"
+        assert args["adversarial_fraction"] == pytest.approx(0.10)
+        assert args["rlox_server_url"] == server_url
+
+
+# ---------------------------------------------------------------------------
+# K2) prime-rl venv bin dir is prepended to PATH in the subprocess env
+#
+# Regression: run_one now prepends os.path.dirname(prime_rl_bin) to PATH so
+# that prime-rl's child processes (orchestrator / trainer) can be resolved by
+# bare name via PATH when rl is invoked by absolute path rather than uv run.
+# CUDA_VISIBLE_DEVICES must still be "0" alongside the PATH change.
+# ---------------------------------------------------------------------------
+
+class TestPrimeRlBinDirOnPath:
+    """os.path.dirname(prime_rl_bin) must be the FIRST entry in PATH passed
+    to subprocess.run, and CUDA_VISIBLE_DEVICES must remain "0"."""
+
+    _NON_TRIVIAL_BIN = "/opt/prime-rl/.venv/bin/rl"
+    _EXPECTED_BIN_DIR = "/opt/prime-rl/.venv/bin"
+
+    def _make_run_one_with_bin(
+        self,
+        bin_path: str,
+        base_toml: Path,
+        output_root: Path,
+        repo_root: Path,
+        *,
+        scope_for_baseline: bool = False,
+    ):
+        return make_primerl_run_one(
+            base_toml=str(base_toml),
+            max_steps=1,
+            group_size=4,
+            rlox_server_url=_FAKE_SERVER_URL,
+            prime_rl_bin=bin_path,
+            output_root=str(output_root),
+            repo_root=str(repo_root),
+            scope_for_baseline=scope_for_baseline,
+            in_loop_timeout_secs=60,
+        )
+
+    def test_bin_dir_is_first_path_entry_for_rlox(
+        self, base_toml: Path, tmp_path: Path, repo_root: Path
+    ):
+        """For condition='rlox', dirname(prime_rl_bin) is the first PATH component."""
+        run_one = self._make_run_one_with_bin(
+            self._NON_TRIVIAL_BIN, base_toml, tmp_path, repo_root
+        )
+        captured_envs: list[dict] = []
+
+        def fake_subprocess_run(cmd, env=None, **kwargs):
+            if env is not None:
+                captured_envs.append(dict(env))
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("rlox", 0, 0.0)
+
+        assert captured_envs, "subprocess.run env kwarg was never captured"
+        path_entries = captured_envs[0]["PATH"].split(os.pathsep)
+        assert path_entries[0] == self._EXPECTED_BIN_DIR, (
+            f"First PATH entry must be {self._EXPECTED_BIN_DIR!r}; "
+            f"got {path_entries[0]!r}\nFull PATH: {captured_envs[0]['PATH']}"
+        )
+
+    def test_bin_dir_is_first_path_entry_for_in_loop(
+        self, base_toml: Path, tmp_path: Path, repo_root: Path
+    ):
+        """For condition='in_loop', dirname(prime_rl_bin) is still the first PATH component."""
+        run_one = self._make_run_one_with_bin(
+            self._NON_TRIVIAL_BIN, base_toml, tmp_path, repo_root,
+            scope_for_baseline=False,
+        )
+        captured_envs: list[dict] = []
+
+        def fake_subprocess_run(cmd, env=None, **kwargs):
+            if env is not None:
+                captured_envs.append(dict(env))
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("in_loop", 0, 0.0)
+
+        assert captured_envs
+        path_entries = captured_envs[0]["PATH"].split(os.pathsep)
+        assert path_entries[0] == self._EXPECTED_BIN_DIR, (
+            f"First PATH entry must be {self._EXPECTED_BIN_DIR!r}; "
+            f"got {path_entries[0]!r}"
+        )
+
+    def test_bin_dir_precedes_inherited_path(
+        self, base_toml: Path, tmp_path: Path, repo_root: Path
+    ):
+        """The injected bin dir must come BEFORE the inherited PATH (not appended)."""
+        run_one = self._make_run_one_with_bin(
+            self._NON_TRIVIAL_BIN, base_toml, tmp_path, repo_root
+        )
+        captured_envs: list[dict] = []
+
+        def fake_subprocess_run(cmd, env=None, **kwargs):
+            if env is not None:
+                captured_envs.append(dict(env))
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("rlox", 0, 0.0)
+
+        assert captured_envs
+        path_val = captured_envs[0]["PATH"]
+        inherited_path = os.environ.get("PATH", "")
+        if inherited_path:
+            assert path_val.startswith(self._EXPECTED_BIN_DIR + os.pathsep), (
+                f"PATH must start with '{self._EXPECTED_BIN_DIR}{os.pathsep}'; "
+                f"got: {path_val!r}"
+            )
+
+    def test_cuda_visible_devices_still_set_alongside_path(
+        self, base_toml: Path, tmp_path: Path, repo_root: Path
+    ):
+        """PATH injection must not displace CUDA_VISIBLE_DEVICES from the env."""
+        run_one = self._make_run_one_with_bin(
+            self._NON_TRIVIAL_BIN, base_toml, tmp_path, repo_root
+        )
+        captured_envs: list[dict] = []
+
+        def fake_subprocess_run(cmd, env=None, **kwargs):
+            if env is not None:
+                captured_envs.append(dict(env))
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("rlox", 0, 0.0)
+
+        assert captured_envs
+        assert captured_envs[0].get("CUDA_VISIBLE_DEVICES") == "0", (
+            "CUDA_VISIBLE_DEVICES must remain '0' after PATH injection"
+        )
+
+    def test_bin_dir_path_and_cuda_both_set_for_in_loop(
+        self, base_toml: Path, tmp_path: Path, repo_root: Path
+    ):
+        """For in_loop condition both PATH prepend and CUDA_VISIBLE_DEVICES must be set."""
+        run_one = self._make_run_one_with_bin(
+            self._NON_TRIVIAL_BIN, base_toml, tmp_path, repo_root,
+            scope_for_baseline=False,
+        )
+        captured_envs: list[dict] = []
+
+        def fake_subprocess_run(cmd, env=None, **kwargs):
+            if env is not None:
+                captured_envs.append(dict(env))
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("in_loop", 0, 0.0)
+
+        assert captured_envs
+        env_captured = captured_envs[0]
+        assert env_captured.get("CUDA_VISIBLE_DEVICES") == "0"
+        assert env_captured["PATH"].split(os.pathsep)[0] == self._EXPECTED_BIN_DIR
 
 
 # ---------------------------------------------------------------------------

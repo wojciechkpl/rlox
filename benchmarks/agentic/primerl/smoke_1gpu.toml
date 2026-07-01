@@ -1,0 +1,63 @@
+# prime-rl single-GPU (decoupled) smoke config for the rlox agentic benchmark.
+# Qwen3-4B-Instruct-2507 + LoRA, trainer+orchestrator colocated on ONE RTX 5090
+# (GPU 0) alongside an EXTERNALLY-launched inference server (see infer_1gpu.toml).
+#
+# Why decoupled: prime-rl's integrated `rl` launcher gives inference and the
+# trainer disjoint GPUs (floor = 2 GPUs). Omitting [inference] sets inference=None,
+# so `rl` starts only the trainer (num_train_gpus=1) + orchestrator, and the
+# orchestrator drives rollouts against the external server via the elastic client.
+#
+# Baseline vs Treatment is selected via the env arg `rollout_backend`
+# ("in_loop" | "rlox"); adversarial injection via `adversarial_fraction`.
+# run_one (make_primerl_run_one) overrides rollout_backend/adversarial_fraction/
+# seed/wandb.name/max_steps/output_dir per grid point.
+#
+# Launch (inference server must already be live on :8000):
+#   uv run --no-sync rl @ benchmarks/agentic/primerl/smoke_1gpu.toml --max-steps 8
+
+max_steps = 8
+seq_len = 1024
+
+[ckpt]
+
+[model]
+name = "Qwen/Qwen3-4B-Instruct-2507"
+
+[wandb]
+project = "rlox-agentic-smoke"
+name = "smoke-1gpu"
+
+[deployment]
+num_train_gpus = 1          # trainer on GPU 0; inference omitted → num_infer_gpus=0 → total=1
+
+[trainer.model]
+impl = "auto"
+
+[trainer.model.ac]          # activation checkpointing — saves activation memory
+freq = 1
+
+[trainer.model.lora]        # LoRA: train adapters only (fits 32 GB alongside vLLM)
+rank = 32
+alpha = 64
+
+[trainer.optim]
+lr = 1e-5
+
+[orchestrator]
+batch_size = 8              # tiny for the smoke
+group_size = 4
+
+# Decoupled: connect to the externally-launched inference server (infer_1gpu.toml).
+[orchestrator.client.elastic]
+hostname = "localhost"
+port = 8000
+
+[orchestrator.train.sampling]
+max_completion_tokens = 512
+
+[[orchestrator.train.env]]
+id = "rlox-verify"
+args = { rollout_backend = "in_loop", adversarial_fraction = 0.0, per_sample_timeout_secs = 5.0, group_size = 4, n_problems = 16 }
+
+[orchestrator.renderer]
+name = "auto"
