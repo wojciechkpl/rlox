@@ -12,10 +12,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Any, Callable
+
+# Compiled patterns for _parse_rl_log — re is stdlib, safe at module level.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+# Matches: Step <N> | ... | Reward <float> | ...
+# The reward group accepts only a proper float (sign, digits, optional decimal)
+# to avoid spurious matches on truncated / interleaved teardown lines.
+_STEP_LINE_RE = re.compile(r"Step\s+(\d+)\s*\|.*?\|\s*Reward\s+([-+]?\d+(?:\.\d+)?)")
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +276,10 @@ def _count_completed_steps(output_dir: Path) -> int:
     """Count ``rollouts/step_<N>/`` subdirs written by prime-rl.
 
     Only directories whose name suffix is purely numeric are counted to avoid
-    future ``step_N_checkpoint``-style dirs inflating the count.
+    future ``step_N_checkpoint``-style dirs inflating the count.  Note: counts
+    cardinality of matching dirs — a reused output_root with leftover dirs from
+    a prior run would overcount; clean sweeps use unique per-run labels so this
+    is not a live concern.
     """
     rollouts_dir = output_dir / "rollouts"
     if not rollouts_dir.is_dir():
@@ -280,6 +291,58 @@ def _count_completed_steps(output_dir: Path) -> int:
         and d.name.startswith("step_")
         and d.name[len("step_") :].isdigit()
     )
+
+
+def _parse_rl_log(log_path: Path) -> tuple[int, float | None]:
+    """Parse ``rl.log`` and return ``(step_count, last_reward)``.
+
+    Scans for lines matching the prime-rl progress format::
+
+        Step <N> |   11.6s | Reward <X.XXXX> | ...
+
+    ANSI colour escapes are stripped before matching so both plain and coloured
+    output are handled.
+
+    Returns:
+        (step_count, last_reward) where step_count is the number of matched
+        Step lines and last_reward is the reward on the highest-N Step line,
+        or ``None`` when no Step lines are found.
+
+    This function is total — it never raises.  Every error path (missing file,
+    encoding errors, malformed reward token) is handled locally.  When a Step
+    line is matched but its reward token fails to parse as a float, the step is
+    still counted (it happened) but the reward for that line is skipped; the
+    last VALID reward on the highest-indexed Step line is returned.
+    """
+    if not log_path.is_file():
+        return 0, None
+
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return 0, None
+
+    best_step: int = -1
+    best_reward: float | None = None
+    count = 0
+
+    for line in text.splitlines():
+        clean = _ANSI_ESCAPE_RE.sub("", line)
+        m = _STEP_LINE_RE.search(clean)
+        if m is None:
+            continue
+        count += 1
+        step_idx = int(m.group(1))
+        try:
+            reward = float(m.group(2))
+        except ValueError:
+            # Malformed reward token: count the step but skip the reward update.
+            continue
+        if step_idx > best_step:
+            best_step = step_idx
+            best_reward = reward
+
+    return count, best_reward
 
 
 def _last_step_mean_reward(output_dir: Path) -> float:
@@ -431,10 +494,13 @@ def make_primerl_run_one(
         if _bin_dir:
             env["PATH"] = _bin_dir + os.pathsep + env.get("PATH", "")
 
+        log_path = run_dir / "rl.log"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
         t0 = time.monotonic()
         try:
-            proc = subprocess.run(cmd, env=env, capture_output=False)
-            returncode = proc.returncode
+            with open(log_path, "w", encoding="utf-8") as _lf:
+                subprocess.run(cmd, env=env, stdout=_lf, stderr=subprocess.STDOUT)
         except Exception as exc:
             logger.error(
                 "run_one(%s, %d, %.2f) subprocess error: %s",
@@ -455,18 +521,28 @@ def make_primerl_run_one(
             }
 
         elapsed = time.monotonic() - t0
-        completed_steps = _count_completed_steps(run_dir)
-        mean_reward = _last_step_mean_reward(run_dir)
 
-        survived = returncode == 0 and completed_steps >= max_steps
+        # Prefer log-based step count; fall back to rollout-dir count; take max.
+        log_step_count, log_last_reward = _parse_rl_log(log_path)
+        dir_step_count = _count_completed_steps(run_dir)
+        completed_steps = max(log_step_count, dir_step_count)
+
+        # Prefer reward from the log; fall back to JSONL parse.
+        if log_last_reward is not None:
+            mean_reward = log_last_reward
+        else:
+            mean_reward = _last_step_mean_reward(run_dir)
+
+        # Survival is purely step-count based — exit code is NOT consulted.
+        # prime-rl exits 143 (SIGTERM of child processes) on a clean finish.
+        survived = completed_steps >= max_steps
 
         if not survived:
             logger.warning(
-                "run_one(%s, %d, %.2f) did not survive: returncode=%d completed_steps=%d/%d",
+                "run_one(%s, %d, %.2f) did not survive: completed_steps=%d/%d",
                 condition,
                 seed,
                 fraction,
-                returncode,
                 completed_steps,
                 max_steps,
             )

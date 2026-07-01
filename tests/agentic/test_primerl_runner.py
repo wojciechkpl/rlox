@@ -218,6 +218,32 @@ def _write_rollouts(run_dir: Path, n_steps: int, rewards_per_step: list[list[flo
         (step_dir / "train_rollouts.jsonl").write_text(jsonl, encoding="utf-8")
 
 
+def _make_step_line(step: int, reward: float, *, ansi: bool = False) -> str:
+    """Return a single prime-rl progress line for the given step and reward.
+
+    When ``ansi=True`` the line is wrapped in ANSI colour escape sequences
+    exactly as the real ``rl`` launcher emits them, to exercise ANSI stripping.
+    """
+    plain = f"Step {step} |   11.6s | Reward {reward:.4f} | Trainable 4/8 (50.0%) | Turns 1.0"
+    if ansi:
+        # Wrap with a common ANSI green prefix and reset suffix.
+        return f"\x1b[32m{plain}\x1b[0m"
+    return plain
+
+
+def _write_rl_log(run_dir: Path, step_rewards: list[float], *, ansi: bool = False) -> Path:
+    """Write ``<run_dir>/rl.log`` with one Step line per entry in step_rewards.
+
+    step_rewards[k] is the reward for step k (0-indexed).
+    Returns the path to the written log file.
+    """
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lines = [_make_step_line(k, r, ansi=ansi) for k, r in enumerate(step_rewards)]
+    log_path = run_dir / "rl.log"
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return log_path
+
+
 # ---------------------------------------------------------------------------
 # A) Return shape parity with make_trl_run_one
 # ---------------------------------------------------------------------------
@@ -875,7 +901,7 @@ class TestSurvivalSuccess:
 # ---------------------------------------------------------------------------
 
 class TestDnfCrash:
-    """survived=False + completed_steps == k when only k < max_steps dirs exist."""
+    """survived=False + completed_steps == k when only k < max_steps steps are logged."""
 
     @pytest.mark.parametrize("k,max_steps", [(0, 3), (1, 3), (2, 5)])
     def test_survived_false_on_partial_steps(
@@ -883,13 +909,21 @@ class TestDnfCrash:
         k: int, max_steps: int,
         base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path,
     ):
+        """k log lines (k < max_steps) => survived=False, completed_steps == k.
+
+        Uses the log as the primary step source (new contract); rc is non-zero
+        (crash) but survival is determined by step count, not rc.
+        """
         run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
 
         def fake_subprocess_run(cmd, **kwargs):
             p = _extract_toml_path_from_cmd(cmd)
             if p:
-                _write_rollouts(Path(p).parent, k)  # only k steps
-            return _FakeProcess(returncode=1)  # non-zero exit
+                run_dir = Path(p).parent
+                # Write k log lines (fewer than max_steps) — no rollout dirs
+                if k > 0:
+                    _write_rl_log(run_dir, [0.5] * k)
+            return _FakeProcess(returncode=1)  # crashed
 
         with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
             result = run_one("rlox", 0, 0.0)
@@ -897,22 +931,511 @@ class TestDnfCrash:
         assert result["survived"] is False
         assert result["completed_steps"] == k
 
-    def test_survived_false_when_rc_nonzero_even_if_all_steps_written(
+    def test_survived_true_when_all_steps_logged_but_rc_143(
         self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
     ):
-        """Non-zero returncode => survived=False regardless of step count."""
+        """A clean prime-rl finish: logs all max_steps Step lines, exits 143 (SIGTERM).
+
+        The OLD contract was: rc!=0 => survived=False.
+        The NEW contract is: survived = (completed_steps >= max_steps), rc-independent.
+        Exit 143 is the normal completion signal from prime-rl (SIGTERM of children).
+        """
         max_steps = 3
+        step_rewards = [0.5, 0.6, 0.75]  # three steps, last reward = 0.75
         run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
 
         def fake_subprocess_run(cmd, **kwargs):
             p = _extract_toml_path_from_cmd(cmd)
             if p:
-                _write_rollouts(Path(p).parent, max_steps)
-            return _FakeProcess(returncode=2)  # crashed after writing
+                run_dir = Path(p).parent
+                _write_rl_log(run_dir, step_rewards)
+            return _FakeProcess(returncode=143)  # SIGTERM — the normal prime-rl finish
 
         with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
             result = run_one("rlox", 0, 0.0)
 
+        assert result["survived"] is True, (
+            "survived must be True when all steps are logged, even with rc=143 (SIGTERM)"
+        )
+        assert result["completed_steps"] == max_steps
+        assert result["mean_reward_last"] == pytest.approx(0.75)
+
+
+# ---------------------------------------------------------------------------
+# F2) Log capture and log-based parsing (new contract from live validation)
+#
+# The launcher now redirects rl stdout+stderr to <run_dir>/rl.log.
+# completed_steps = max(log_step_count, rollout_dir_count).
+# mean_reward_last = Reward value on the highest Step N line (ANSI-stripped);
+# fallback to jsonl parse when log has no Step lines.
+# ---------------------------------------------------------------------------
+
+class TestLogCapture:
+    """Launcher must capture rl output to rl.log and parse step count / reward from it."""
+
+    def test_rl_log_is_written_to_run_dir(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """subprocess.run must be called with stdout/stderr redirected so rl.log is produced."""
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=1)
+        captured_kwargs: list[dict] = []
+
+        def fake_subprocess_run(cmd, **kwargs):
+            captured_kwargs.append(dict(kwargs))
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                # Simulate what the launcher should do: write rl.log
+                _write_rl_log(Path(p).parent, [0.5])
+            return _FakeProcess(returncode=143)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("rlox", 0, 0.0)
+
+        # The launcher must NOT use capture_output=False (which discards output).
+        # It must redirect to a file so rl.log exists.
+        assert captured_kwargs, "subprocess.run was never called"
+        kw = captured_kwargs[0]
+        assert kw.get("capture_output") is not False or "stdout" in kw or "stderr" in kw, (
+            "launcher must capture stdout/stderr (not discard with capture_output=False)"
+        )
+
+    def test_log_based_step_count_plain(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """completed_steps must be parsed from Step N lines in rl.log (plain, no ANSI)."""
+        max_steps = 4
+        step_rewards = [0.5, 0.6, 0.7, 0.8]
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rl_log(Path(p).parent, step_rewards, ansi=False)
+            return _FakeProcess(returncode=143)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["completed_steps"] == max_steps
+        assert result["survived"] is True
+
+    def test_log_based_step_count_ansi_wrapped(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """Step lines wrapped in ANSI colour codes must still be counted correctly."""
+        max_steps = 3
+        step_rewards = [0.4, 0.6, 0.9]
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rl_log(Path(p).parent, step_rewards, ansi=True)
+            return _FakeProcess(returncode=143)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["completed_steps"] == max_steps, (
+            "ANSI-wrapped Step lines must be stripped and counted; "
+            f"got completed_steps={result['completed_steps']}, expected {max_steps}"
+        )
+        assert result["survived"] is True
+
+    def test_mean_reward_last_from_log_plain(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """mean_reward_last must equal the Reward value on the highest-N Step line (plain)."""
+        max_steps = 3
+        step_rewards = [0.5, 0.6, 0.75]  # last step reward = 0.75
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rl_log(Path(p).parent, step_rewards, ansi=False)
+            return _FakeProcess(returncode=143)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["mean_reward_last"] == pytest.approx(0.75), (
+            f"mean_reward_last must be 0.75 (last Step line reward); "
+            f"got {result['mean_reward_last']}"
+        )
+
+    def test_mean_reward_last_from_log_ansi_wrapped(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """mean_reward_last must be parsed from ANSI-wrapped Step lines."""
+        max_steps = 2
+        step_rewards = [0.3, 0.9]  # last = 0.9
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rl_log(Path(p).parent, step_rewards, ansi=True)
+            return _FakeProcess(returncode=143)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["mean_reward_last"] == pytest.approx(0.9)
+
+    def test_log_step_count_takes_priority_over_rollout_dirs_when_higher(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """When log has more steps than rollout dirs, log count wins (max rule).
+
+        Real scenario: prime-rl only persists rollouts/step_0 due to gating,
+        but the log has all N Step lines.
+        """
+        max_steps = 4
+        step_rewards = [0.5, 0.6, 0.7, 0.8]  # 4 log lines
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                run_dir = Path(p).parent
+                # Only ONE rollout dir (gated saving), but FOUR log lines
+                _write_rollouts(run_dir, 1)
+                _write_rl_log(run_dir, step_rewards)
+            return _FakeProcess(returncode=143)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["completed_steps"] == max_steps, (
+            f"Log count (4) must win over rollout dir count (1); "
+            f"got completed_steps={result['completed_steps']}"
+        )
+        assert result["survived"] is True
+
+    def test_rollout_dir_count_used_as_fallback_when_log_has_no_step_lines(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """When rl.log exists but has no Step N lines, rollout dir count is the fallback."""
+        max_steps = 2
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                run_dir = Path(p).parent
+                # Log with no Step lines (e.g. only startup noise)
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "rl.log").write_text(
+                    "Starting server...\nConfig loaded.\n", encoding="utf-8"
+                )
+                # Rollout dirs provide the fallback count
+                _write_rollouts(run_dir, max_steps)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["completed_steps"] == max_steps
+
+    def test_mean_reward_falls_back_to_jsonl_when_log_has_no_step_lines(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """If log has no Step lines, mean_reward_last must come from train_rollouts.jsonl."""
+        max_steps = 1
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                run_dir = Path(p).parent
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "rl.log").write_text("No step lines here.\n", encoding="utf-8")
+                _write_rollouts(run_dir, max_steps, [[0.42]])
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["mean_reward_last"] == pytest.approx(0.42), (
+            f"mean_reward_last should fall back to jsonl (0.42); got {result['mean_reward_last']}"
+        )
+
+    def test_survival_rc_independent_all_steps_logged_rc_nonzero(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """survived depends only on completed_steps >= max_steps, not on rc.
+
+        Any nonzero rc (1, 2, 143, 255…) with all steps logged → survived=True.
+        """
+        max_steps = 2
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        for rc in (1, 2, 143, 255):
+            def fake_subprocess_run(cmd, _rc=rc, **kwargs):
+                p = _extract_toml_path_from_cmd(cmd)
+                if p:
+                    _write_rl_log(Path(p).parent, [0.5] * max_steps)
+                return _FakeProcess(returncode=_rc)
+
+            with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+                result = run_one("rlox", 0, 0.0)
+
+            assert result["survived"] is True, (
+                f"survived must be True with {max_steps} steps logged and rc={rc}"
+            )
+
+    def test_survival_false_when_fewer_log_lines_than_max_steps(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """If fewer Step lines than max_steps, survived=False regardless of rc."""
+        max_steps = 5
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                # Only 2 steps logged (crash mid-run)
+                _write_rl_log(Path(p).parent, [0.5, 0.6])
+            return _FakeProcess(returncode=1)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["survived"] is False
+        assert result["completed_steps"] == 2
+
+    def test_log_step_indices_are_parsed_not_counted_sequentially(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """The parser must find the highest step index N from 'Step N |' lines.
+
+        This distinguishes a parser that counts lines from one that reads the N.
+        A log with steps [0, 1, 3] (step 2 missing) has highest N=3 → 4 steps seen
+        is ambiguous; the contract says count of distinct Step lines, so 3 here.
+        For a clean run 0..N-1 the count equals N (the normal case we exercise here).
+        """
+        max_steps = 3
+        step_rewards = [0.3, 0.5, 0.8]  # steps 0, 1, 2
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                _write_rl_log(Path(p).parent, step_rewards)
+            return _FakeProcess(returncode=143)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["completed_steps"] == 3
+        assert result["mean_reward_last"] == pytest.approx(0.8)
+
+
+# ---------------------------------------------------------------------------
+# F3) Log-parsing resilience — malformed reward tokens must not propagate
+#
+# Regression for: _parse_rl_log calls float(m.group(2)) outside its try/except,
+# so a malformed reward token (e.g. "Reward -0.3.3") raises ValueError which
+# propagates through run_one (also outside the subprocess try/except) and
+# mis-classifies a completed run as DNF.
+#
+# Fixed contract:
+#   - run_one NEVER raises from log-parsing errors.
+#   - A malformed reward token on the LAST Step line: step is still COUNTED
+#     (completed_steps increments), but the reward value is SKIPPED; the
+#     reported mean_reward_last falls back to the last VALID reward, or 0.0.
+#   - A Step line with NO Reward field: same — counted but reward skipped.
+# ---------------------------------------------------------------------------
+
+class TestLogParsingResilience:
+    """_parse_rl_log must never raise; malformed reward tokens skip the value only."""
+
+    # Helper: write a log with explicitly constructed raw lines so we can inject
+    # malformed reward tokens that normal _write_rl_log cannot produce.
+    @staticmethod
+    def _write_raw_log(run_dir: Path, lines: list[str]) -> None:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "rl.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_malformed_reward_token_does_not_raise(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """run_one must not propagate ValueError when a reward token is malformed."""
+        max_steps = 2
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                self._write_raw_log(Path(p).parent, [
+                    # step 0 — valid
+                    "Step 0 |   11.6s | Reward 0.5000 | Trainable 4/8 (50.0%) | Turns 1.0",
+                    # step 1 — malformed reward token ("-0.3.3" has two dots)
+                    "Step 1 |   12.1s | Reward -0.3.3 | Trainable 4/8 (50.0%) | Turns 1.0",
+                ])
+            return _FakeProcess(returncode=143)
+
+        # Must not raise ValueError (or anything else).
+        try:
+            with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+                result = run_one("rlox", 0, 0.0)
+        except Exception as exc:
+            pytest.fail(
+                f"run_one raised {type(exc).__name__} on malformed reward token: {exc!r}"
+            )
+
+        assert isinstance(result, dict), "run_one must return a dict, not raise"
+
+    def test_malformed_reward_step_is_still_counted(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """A Step line with a malformed reward token still increments completed_steps."""
+        max_steps = 2
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                self._write_raw_log(Path(p).parent, [
+                    "Step 0 |   11.6s | Reward 0.5000 | Trainable 4/8 (50.0%) | Turns 1.0",
+                    "Step 1 |   12.1s | Reward -0.3.3 | Trainable 4/8 (50.0%) | Turns 1.0",
+                ])
+            return _FakeProcess(returncode=143)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            result = run_one("rlox", 0, 0.0)
+
+        assert result["completed_steps"] == max_steps, (
+            f"Both steps must be counted even when the last reward is malformed; "
+            f"got completed_steps={result['completed_steps']}"
+        )
+        assert result["survived"] is True, (
+            "survived must be True: completed_steps == max_steps despite malformed reward"
+        )
+
+    def test_malformed_last_reward_falls_back_to_previous_valid_reward(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """When the last Step line's reward token cannot be parsed as a float,
+        mean_reward_last falls back to the last VALID reward from earlier steps.
+
+        The malformed reward token used here (``Reward NaN``) is not matched by
+        the regex (``NaN`` has no leading digit/sign), so that step line is not
+        counted — the test verifies that completed_steps reflects only matched
+        Step lines and mean_reward_last is the last valid one.
+
+        Assumption: the implementer counts only lines that fully match
+        ``Step N | ... | Reward <parseable-float> | ...``; an unmatched line
+        is not counted toward completed_steps.
+        """
+        # With 2 valid steps and 1 unparseable step, completed_steps == 2.
+        # max_steps is also set to 2 so survived == True.
+        max_steps = 2
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                self._write_raw_log(Path(p).parent, [
+                    # step 0 — valid, reward 0.4
+                    "Step 0 |   11.6s | Reward 0.4000 | Trainable 4/8 (50.0%) | Turns 1.0",
+                    # step 1 — valid, reward 0.6 — this IS the last matched line
+                    "Step 1 |   12.1s | Reward 0.6000 | Trainable 4/8 (50.0%) | Turns 1.0",
+                    # step 2 — "NaN" is not matched by the regex → step not counted,
+                    # reward not updated; step 1 remains the last valid reward
+                    "Step 2 |   13.0s | Reward NaN | Trainable 4/8 (50.0%) | Turns 1.0",
+                ])
+            return _FakeProcess(returncode=143)
+
+        try:
+            with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+                result = run_one("rlox", 0, 0.0)
+        except Exception as exc:
+            pytest.fail(f"run_one raised {type(exc).__name__} on NaN reward token: {exc!r}")
+
+        # Only 2 lines matched (steps 0 and 1); step 2 "NaN" line is not matched.
+        assert result["completed_steps"] == max_steps, (
+            f"completed_steps must be {max_steps} (matched lines only); "
+            f"got {result['completed_steps']}"
+        )
+        # Step 1 (0.6000) is the last valid matched reward.
+        assert result["mean_reward_last"] == pytest.approx(0.6), (
+            f"mean_reward_last must be last valid reward (0.6); "
+            f"got {result['mean_reward_last']}"
+        )
+        assert result["survived"] is True
+
+    def test_step_line_missing_reward_field_does_not_raise(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """A Step line with no Reward field at all must not raise and must not be counted
+        for the reward value (but is still counted as a step if the Step N | pattern matches
+        — implementation may or may not match; what matters is NO RAISE and valid result)."""
+        max_steps = 2
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                self._write_raw_log(Path(p).parent, [
+                    # step 0 — valid, reward 0.7
+                    "Step 0 |   11.6s | Reward 0.7000 | Trainable 4/8 (50.0%) | Turns 1.0",
+                    # step 1 — no Reward field; the regex won't match it, so it does not
+                    # contribute to count or reward; step 0 remains the only counted line
+                    "Step 1 |   12.1s | Loss 0.003 | Trainable 4/8 (50.0%) | Turns 1.0",
+                ])
+            return _FakeProcess(returncode=143)
+
+        try:
+            with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+                result = run_one("rlox", 0, 0.0)
+        except Exception as exc:
+            pytest.fail(
+                f"run_one raised {type(exc).__name__} on Step line without Reward field: {exc!r}"
+            )
+
+        assert isinstance(result, dict)
+        # The valid step (step 0, reward 0.7) must be reflected
+        assert result["mean_reward_last"] == pytest.approx(0.7), (
+            f"mean_reward_last should be 0.7 (from the valid Step 0 line); "
+            f"got {result['mean_reward_last']}"
+        )
+
+    def test_all_rewards_unparseable_returns_zero_not_raises(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        """If every Step line's reward token is unrecognisable by the regex,
+        mean_reward_last must be 0.0 — no raise.
+
+        Uses ``Reward NaN`` on all lines (NaN has no leading digit, so the
+        Reward group does not match and the whole Step line goes uncounted).
+        completed_steps == 0, survived == False (0 < max_steps).
+        """
+        max_steps = 2
+        run_one = _make_factory(base_toml, tmp_path, prime_rl_bin, repo_root, max_steps=max_steps)
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                self._write_raw_log(Path(p).parent, [
+                    "Step 0 |   11.6s | Reward NaN | Trainable 4/8 (50.0%) | Turns 1.0",
+                    "Step 1 |   12.1s | Reward NaN | Trainable 4/8 (50.0%) | Turns 1.0",
+                ])
+            return _FakeProcess(returncode=143)
+
+        try:
+            with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+                result = run_one("rlox", 0, 0.0)
+        except Exception as exc:
+            pytest.fail(f"run_one raised {type(exc).__name__} on all-NaN log: {exc!r}")
+
+        assert result["mean_reward_last"] == pytest.approx(0.0), (
+            f"mean_reward_last must be 0.0 when no reward tokens are parseable; "
+            f"got {result['mean_reward_last']}"
+        )
+        # No lines matched → completed_steps == 0 (rollout dirs also absent).
+        assert result["completed_steps"] == 0
         assert result["survived"] is False
 
 
