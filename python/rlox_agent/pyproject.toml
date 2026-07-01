@@ -9,6 +9,7 @@ dependencies = [
 [project.optional-dependencies]
 verifiers = ["verifiers>=0.1.15.dev0", "datasets>=2.14"]
 torch = ["rlox"]  # optional: rlox wheel from Maturin
+agentic = ["tomli-w>=1.0"]  # prime-rl TOML rendering (Step 8 launcher)
 
 [build-system]
 requires = ["hatchling"]
