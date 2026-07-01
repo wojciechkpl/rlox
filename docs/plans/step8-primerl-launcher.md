@@ -175,17 +175,16 @@ it in the non-adversarial reward branch (adversarial code stays verbatim). **Ver
 prime-rl (1× 5090): real GRPO training** — step0 reward 0.75, step1 0.375, step2 0.75, 50% trainable
 (no zero-advantage abort). 19 shared + 7 env-level tests green.
 
-**New follow-up — launcher outcome-parsing for a *completing* prime-rl run.** Now that runs finish,
-the launcher's success-metrics (built against *aborting* runs) mis-measure a clean completion:
-- A normal finish exits **143** (the verifiers `Environment` SIGTERM teardown handler,
-  `deps/verifiers/.../environment.py:274`), not 0 — so `survived` (keyed on `rc==0`) reads False.
-- prime-rl only persists `rollouts/step_0` (rollout saving is gated), so `completed_steps`
-  (a `rollouts/step_*` dir count) undercounts vs the actual step count.
-- `mean_reward_last` reads 0.0 because only step_0's (possibly dropped) rollouts exist.
-Fix direction: derive `completed_steps` + `mean_reward_last` from the orchestrator's
-`Step N | Reward … | Trainable …` log lines (or a completion marker), and treat exit 143 after
-reaching `max_steps` as a clean finish. This is required before the prime-rl P3 sweep yields
-correct survival/reward numbers. The full multi-GPU P1 sweep remains a GCP follow-up.
+**Launcher outcome-parsing for a *completing* run — RESOLVED (commit 2438fdc).** Runs that finish
+were mis-measured (clean finish exits **143** via the verifiers SIGTERM teardown, not 0; only
+`rollouts/step_0` persists). Fixed: the launcher captures `rl` output to `<run_dir>/rl.log` and
+parses the orchestrator's `Step N | … | Reward X` lines (ANSI-tolerant) —
+`completed_steps = max(log_step_count, rollout_dir_count)`, `mean_reward_last` = highest-index
+step's reward, and **`survived = completed_steps >= max_steps`** (exit code not consulted).
+`_parse_rl_log` is total (guarded float, strict-float regex) so a truncated SIGTERM-interleaved
+line can't mis-flag a survivor as DNF. **Verified live: a completing run reports
+`survived=True, completed_steps=3, mean_reward_last=0.875`.** 81 launcher tests (5 parse-resilience
+guards). The full multi-GPU P1 sweep remains a GCP follow-up.
 
 ### Reproduce the 1-GPU decoupled smoke
 ```bash
