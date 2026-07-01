@@ -1861,6 +1861,79 @@ class TestServerUrlInToml:
 # CUDA_VISIBLE_DEVICES must still be "0" alongside the PATH change.
 # ---------------------------------------------------------------------------
 
+
+class TestCorpusPathInToml:
+    """When corpus_path is passed to make_primerl_run_one it must land in
+    env[0].args.adversarial_corpus_path (the env requires it when
+    adversarial_fraction > 0); when omitted, the key must be absent."""
+
+    @pytest.mark.parametrize("condition", ["rlox", "in_loop"])
+    def test_gen_toml_sets_adversarial_corpus_path(
+        self,
+        condition: str,
+        base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path,
+    ):
+        expected = "/some/where/adversarial_corpus_v1.json"
+        run_one = make_primerl_run_one(
+            base_toml=str(base_toml),
+            max_steps=1,
+            group_size=4,
+            rlox_server_url="http://localhost:8231",
+            prime_rl_bin=str(prime_rl_bin),
+            output_root=str(tmp_path),
+            repo_root=str(repo_root),
+            corpus_path=expected,
+            scope_for_baseline=False,
+            in_loop_timeout_secs=60,
+        )
+        captured: list[str] = []
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                captured.append(p)
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one(condition, 0, 0.10)
+
+        args = _read_gen_toml(captured[0])["orchestrator"]["train"]["env"][0]["args"]
+        assert args["adversarial_corpus_path"] == expected
+        # must not clobber the other injected args
+        assert args["rollout_backend"] == condition
+        assert args["adversarial_fraction"] == 0.10
+
+    def test_gen_toml_omits_corpus_path_when_not_provided(
+        self, base_toml: Path, tmp_path: Path, prime_rl_bin: Path, repo_root: Path
+    ):
+        run_one = make_primerl_run_one(
+            base_toml=str(base_toml),
+            max_steps=1,
+            group_size=4,
+            rlox_server_url="http://localhost:8231",
+            prime_rl_bin=str(prime_rl_bin),
+            output_root=str(tmp_path),
+            repo_root=str(repo_root),
+            scope_for_baseline=False,
+            in_loop_timeout_secs=60,
+        )
+        captured: list[str] = []
+
+        def fake_subprocess_run(cmd, **kwargs):
+            p = _extract_toml_path_from_cmd(cmd)
+            if p:
+                captured.append(p)
+                _write_rollouts(Path(p).parent, 1)
+            return _FakeProcess(returncode=0)
+
+        with patch("run_benchmark.subprocess.run", side_effect=fake_subprocess_run):
+            run_one("rlox", 0, 0.0)
+
+        args = _read_gen_toml(captured[0])["orchestrator"]["train"]["env"][0]["args"]
+        assert "adversarial_corpus_path" not in args
+
+
 class TestPrimeRlBinDirOnPath:
     """os.path.dirname(prime_rl_bin) must be the FIRST entry in PATH passed
     to subprocess.run, and CUDA_VISIBLE_DEVICES must remain "0"."""

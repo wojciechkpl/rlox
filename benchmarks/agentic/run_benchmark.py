@@ -210,6 +210,7 @@ def _render_run_toml(
     fraction: float,
     max_steps: int,
     rlox_server_url: str,
+    corpus_path: str | None = None,
 ) -> Path:
     """Deep-merge base TOML with per-run overrides and write ``run_dir/rl.gen.toml``.
 
@@ -243,6 +244,10 @@ def _render_run_toml(
         merged_args["rollout_backend"] = condition
         merged_args["adversarial_fraction"] = fraction
         merged_args["rlox_server_url"] = rlox_server_url
+        # The env requires the corpus path whenever adversarial_fraction > 0
+        # (it builds the injector from it); harmless when injection is off.
+        if corpus_path is not None:
+            merged_args["adversarial_corpus_path"] = corpus_path
         merged_env0["args"] = merged_args
         new_envs = [merged_env0, *base_envs[1:]]
     else:
@@ -399,6 +404,7 @@ def make_primerl_run_one(
     prime_rl_bin: str | Path,
     output_root: str | Path,
     repo_root: str | Path,
+    corpus_path: str | Path | None = None,
     scope_for_baseline: bool = True,
     in_loop_timeout_secs: int = 7200,
 ) -> Callable[[str, int, float], dict]:
@@ -430,6 +436,7 @@ def make_primerl_run_one(
     _base_toml = Path(base_toml)
     _prime_rl_bin = str(prime_rl_bin)
     _output_root = Path(output_root)
+    _corpus_path = str(corpus_path) if corpus_path is not None else None
 
     def run_one(condition: str, seed: int, fraction: float) -> dict:
         run_label = f"{condition}_seed{seed}_frac{fraction}"
@@ -445,6 +452,7 @@ def make_primerl_run_one(
                 fraction,
                 max_steps,
                 rlox_server_url,
+                _corpus_path,
             )
         except Exception as exc:
             logger.error(

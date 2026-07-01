@@ -42,6 +42,8 @@ GROUP_SIZE = 4
 SERVER_URL = "http://localhost:8231"
 PRIME_RL_BIN = "/home/wk/prime-rl/.venv/bin/rl"
 BASE_TOML = str(REPO / "benchmarks" / "agentic" / "primerl" / "smoke_1gpu.toml")
+# Adversarial corpus injected into the env args when adversarial_fraction > 0.
+CORPUS_PATH = str(REPO / "benchmarks" / "agentic" / "corpus" / "adversarial_corpus_v1.json")
 # Cap a single in_loop Baseline run so an adversarial-code stall can't block
 # the entire smoke for hours.  Passed directly to make_primerl_run_one.
 IN_LOOP_TIMEOUT_SECS = 1800  # 30 min/run
@@ -65,6 +67,7 @@ def main() -> int:
         prime_rl_bin=PRIME_RL_BIN,
         output_root=str(out / "runs"),
         repo_root=str(REPO),
+        corpus_path=CORPUS_PATH,
         scope_for_baseline=True,
         in_loop_timeout_secs=IN_LOOP_TIMEOUT_SECS,
     )
