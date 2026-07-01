@@ -1206,7 +1206,63 @@ class PQNConfig(ConfigMixin):
             )
 
 
-_VALID_ALGORITHMS = {"ppo", "sac", "dqn", "td3", "a2c", "mappo", "dreamer", "impala", "dt", "qmix", "calql", "trpo", "diffusion", "mpo", "rwdtp", "rcdtp", "pqn"}
+@dataclass
+class CrossQConfig(ConfigMixin):
+    """Configuration for CrossQ training.
+
+    CrossQ is SAC without target networks, using BatchRenorm critics and a
+    joint forward pass for TD stability.  Reference: Bhatt et al., ICLR 2024.
+
+    Attributes
+    ----------
+    learning_rate : float
+        Adam learning rate for all optimisers (default 1e-3).
+    buffer_size : int
+        Replay buffer capacity (default 1_000_000).
+    batch_size : int
+        Minibatch size (default 256).
+    gamma : float
+        Discount factor (default 0.99).
+    target_entropy : float or None
+        Target entropy for auto-tuning.  None → ``-dim(action_space)``.
+    auto_entropy : bool
+        Whether to automatically tune the entropy coefficient (default True).
+    learning_starts : int
+        Random exploration steps before training (default 1000).
+    hidden : int
+        Hidden layer width for actor and critic networks (default 256).
+    policy_delay : int
+        Actor update every ``policy_delay`` critic updates (default 3).
+    bn_momentum : float
+        EMA momentum for BatchRenorm1d running stats (default 0.01).
+    bn_eps : float
+        Numerical stability term for BatchRenorm1d (default 1e-3).
+    renorm_warmup_steps : int
+        Training steps before renorm corrections are applied (default 100_000).
+    """
+
+    learning_rate: float = 1e-3
+    buffer_size: int = 1_000_000
+    batch_size: int = 256
+    gamma: float = 0.99
+    target_entropy: float | None = None
+    auto_entropy: bool = True
+    learning_starts: int = 1000
+    hidden: int = 256
+    policy_delay: int = 3
+    bn_momentum: float = 0.01
+    bn_eps: float = 1e-3
+    renorm_warmup_steps: int = 100_000
+
+    def __post_init__(self) -> None:
+        _validate_positive("learning_rate", self.learning_rate)
+        _validate_min("buffer_size", self.buffer_size, 1)
+        _validate_min("batch_size", self.batch_size, 1)
+        _validate_min("policy_delay", self.policy_delay, 1)
+        _validate_min("renorm_warmup_steps", self.renorm_warmup_steps, 0)
+
+
+_VALID_ALGORITHMS = {"ppo", "sac", "dqn", "td3", "a2c", "mappo", "dreamer", "impala", "dt", "qmix", "calql", "trpo", "diffusion", "mpo", "rwdtp", "rcdtp", "pqn", "crossq"}
 _VALID_LOGGERS = {"tensorboard", "wandb", "console", None}
 _VALID_CALLBACKS = {"eval", "checkpoint", "progress", "timing", "early_stopping"}
 

@@ -365,6 +365,7 @@ def _register_builtins() -> None:
     from rlox.algorithms.mpo import MPO
     from rlox.algorithms.dtp import RWDTP, RCDTP
     from rlox.algorithms.pqn import PQN
+    from rlox.algorithms.crossq import CrossQ
 
     for name, cls in [
         ("ppo", PPO),
@@ -384,6 +385,7 @@ def _register_builtins() -> None:
         ("rwdtp", RWDTP),
         ("rcdtp", RCDTP),
         ("pqn", PQN),
+        ("crossq", CrossQ),
     ]:
         if name not in ALGORITHM_REGISTRY:
             ALGORITHM_REGISTRY[name] = cls
