@@ -186,6 +186,30 @@ line can't mis-flag a survivor as DNF. **Verified live: a completing run reports
 `survived=True, completed_steps=3, mean_reward_last=0.875`.** 81 launcher tests (5 parse-resilience
 guards). The full multi-GPU P1 sweep remains a GCP follow-up.
 
+### prime-rl P3 contrast — qualitative, demonstrated (2026-07-01)
+
+A single Baseline vs the Treatment on prime-rl (1× 5090), enough to show the P3 story on the
+locked host; the full multi-seed sweep is **deferred to GCP** (see below).
+- **Baseline `in_loop` @ 10% injection** → `survived=false, completed_steps=2/6`. The injected fork
+  bomb runs in-process (`run_in_loop` = naked `subprocess.run([python,-c,code], timeout=5)`, no
+  isolation) and starves the trainer; the host hit **load ≈1525**. The only thing that kept the box
+  safe was the launcher's `systemd-run --scope` backstop: task count pinned exactly at
+  `TasksMax=2048` (no further forks), memory bounded, and `systemctl --user stop <scope>` cgroup-kills
+  the whole subtree → instant recovery.
+- **Treatment `rlox`** → completes cleanly; the same adversarial code is contained out-of-process by
+  the sandbox (`/verify`, ~54 µs time-to-contain, zero host impact) — validated separately.
+
+Two fixes en route: (1) `make_primerl_run_one` now injects `adversarial_corpus_path` into the env
+args (commit b9a3659) — without it every `frac>0` run crashed at env-load; (2) earlier probes were
+all `frac=0`, which hid it.
+
+**Operational finding → the full sweep is a GCP job, not a wk-system one.** Each in_loop@high-injection
+run drives the *primary dev box* to load ~1500 (contained + recoverable, but disruptive). A 2×seeds×
+fractions grid = many such runs. Decision (2026-07-01): keep this qualitative prime-rl P3 contrast;
+run the real ≥3-seed sweep on disposable/GCP hardware alongside the multi-GPU P1 work. If a bounded
+sweep on wk-system is ever wanted, parametrize the scope `TasksMax` down (e.g. 512) to cap peak load
+and use a short `in_loop_timeout`.
+
 ### Reproduce the 1-GPU decoupled smoke
 ```bash
 # 1. servers (leave running)
