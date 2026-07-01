@@ -166,14 +166,26 @@ with the orchestrator pointed at it via `[orchestrator.client.elastic]`. Confirm
 2. Prepend the prime-rl venv `bin/` to `PATH` (its `rl` spawns `orchestrator`/`trainer` by bare
    name; a direct-binary invocation otherwise can't resolve them).
 
-**Open follow-up — task calibration on the prime-rl host (NOT a launcher/seam defect).** The base
-Qwen3-4B scores 0 on every completion under prime-rl's `auto` renderer (both MBPP and the easy
-fallback), so zero within-group reward variance → the `zero_advantage` filter drops all rollouts →
-the orchestrator aborts after 10 consecutive empty batches. Same class as the documented
-"MBPP-too-hard → reward 0" caveat. Getting a learning curve / the quality-parity guardrail on
-prime-rl requires aligning the renderer/prompt/code-extraction (or an easier calibrated task) so
-the base model earns partial credit — tracked separately. The full multi-GPU P1 sweep remains a
-GCP follow-up.
+**Task calibration — RESOLVED (commit 53ce075).** Root cause was not renderer/prompt but code
+*extraction*: the env ran the raw completion as Python, so a chat model's markdown (```python
+fences) failed → reward 0 → zero within-group variance → `zero_advantage` dropped all rollouts →
+abort. The TRL runner already stripped fences via `extract_python_code`; the prime-rl env path
+did not. Fix promotes `extract_python_code` into the shared `rlox_agent.verifiers_adapter` and uses
+it in the non-adversarial reward branch (adversarial code stays verbatim). **Verified live on
+prime-rl (1× 5090): real GRPO training** — step0 reward 0.75, step1 0.375, step2 0.75, 50% trainable
+(no zero-advantage abort). 19 shared + 7 env-level tests green.
+
+**New follow-up — launcher outcome-parsing for a *completing* prime-rl run.** Now that runs finish,
+the launcher's success-metrics (built against *aborting* runs) mis-measure a clean completion:
+- A normal finish exits **143** (the verifiers `Environment` SIGTERM teardown handler,
+  `deps/verifiers/.../environment.py:274`), not 0 — so `survived` (keyed on `rc==0`) reads False.
+- prime-rl only persists `rollouts/step_0` (rollout saving is gated), so `completed_steps`
+  (a `rollouts/step_*` dir count) undercounts vs the actual step count.
+- `mean_reward_last` reads 0.0 because only step_0's (possibly dropped) rollouts exist.
+Fix direction: derive `completed_steps` + `mean_reward_last` from the orchestrator's
+`Step N | Reward … | Trainable …` log lines (or a completion marker), and treat exit 143 after
+reaching `max_steps` as a clean finish. This is required before the prime-rl P3 sweep yields
+correct survival/reward numbers. The full multi-GPU P1 sweep remains a GCP follow-up.
 
 ### Reproduce the 1-GPU decoupled smoke
 ```bash
