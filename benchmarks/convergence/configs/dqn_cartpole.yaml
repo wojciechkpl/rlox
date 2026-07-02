@@ -20,6 +20,12 @@ hyperparameters:
   target_update_freq: 10
   learning_starts: 1_000
   hidden: 256
+  # SB3-only override (rlox _filter_hp skips train_freq/gradient_steps,
+  # so these tune ONLY the SB3 run; rlox keeps train-every-step + MSE).
+  # target_update_interval is SB3's name for target_update_freq.
+  train_freq: 256
+  gradient_steps: 128
+  target_update_interval: 10
   # NOTE: rlox DQN uses MSE loss + train-every-step (train_freq=1) by
   # default. SB3 DQN uses Huber + train_freq=256 + gradient_steps=128.
   # The two paths converge to ~500/500 with their respective recipes;
