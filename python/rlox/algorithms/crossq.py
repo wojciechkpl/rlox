@@ -38,6 +38,13 @@ class CrossQ:
         Gymnasium environment ID.  Must have a continuous (Box) action space.
     learning_rate : float
         Adam learning rate for all optimisers (default 1e-3).
+    adam_betas : tuple[float, float]
+        Adam ``(beta1, beta2)`` coefficients for all four optimisers
+        (default ``(0.5, 0.999)``).  CrossQ's BatchRenorm critics need a
+        lower ``beta1`` than torch's default of 0.9 -- a controlled
+        ablation showed ``beta1=0.9`` fails to converge on Pendulum-v1
+        while ``beta1=0.5`` (the paper / SB3-contrib value) solves it. See
+        docs/plans/crossq-convergence-fix-2026-07-18.md.
     gamma : float
         Discount factor (default 0.99).
     batch_size : int
@@ -77,6 +84,7 @@ class CrossQ:
         env_id: str,
         buffer_size: int = 1_000_000,
         learning_rate: float = 1e-3,
+        adam_betas: tuple[float, float] = (0.5, 0.999),
         gamma: float = 0.99,
         batch_size: int = 256,
         learning_starts: int = 1000,
@@ -122,6 +130,18 @@ class CrossQ:
         self.policy_delay = max(1, int(policy_delay))
         self.seed = seed
 
+        # Seed torch/np/env RNG for reproducibility.  This MUST happen
+        # before the actor/critic networks are constructed below so that
+        # their weight initialisation is deterministic for a given seed
+        # (precedent: pqn.py:118).  Gymnasium does not propagate
+        # `env.reset(seed=...)` to the action space's RNG, and the
+        # `learning_starts` exploration phase in `train()` calls
+        # `action_space.sample()`, so the action space needs its own
+        # `.seed()` call here too.
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        self.env.action_space.seed(seed)
+
         # ent_coef handling — mirrors SAC.
         if isinstance(ent_coef, (int, float)):
             auto_entropy = False
@@ -139,6 +159,7 @@ class CrossQ:
 
         self.config = CrossQConfig(
             learning_rate=learning_rate,
+            adam_betas=adam_betas,
             buffer_size=buffer_size,
             batch_size=batch_size,
             gamma=gamma,
@@ -174,13 +195,13 @@ class CrossQ:
         )
 
         self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(), lr=learning_rate
+            self.actor.parameters(), lr=learning_rate, betas=adam_betas
         )
         self.critic1_optimizer = torch.optim.Adam(
-            self.critic1.parameters(), lr=learning_rate
+            self.critic1.parameters(), lr=learning_rate, betas=adam_betas
         )
         self.critic2_optimizer = torch.optim.Adam(
-            self.critic2.parameters(), lr=learning_rate
+            self.critic2.parameters(), lr=learning_rate, betas=adam_betas
         )
 
         # Entropy tuning.
@@ -192,7 +213,7 @@ class CrossQ:
         if auto_entropy:
             self.log_alpha = torch.zeros(1, requires_grad=True)
             self.alpha_optimizer = torch.optim.Adam(
-                [self.log_alpha], lr=learning_rate
+                [self.log_alpha], lr=learning_rate, betas=adam_betas
             )
             self.alpha = self.log_alpha.exp().item()
         else:
@@ -216,7 +237,7 @@ class CrossQ:
 
     def train(self, total_timesteps: int) -> dict[str, float]:
         """Run training loop and return a metrics dict."""
-        obs, _ = self.env.reset()
+        obs, _ = self.env.reset(seed=self.seed)
         episode_rewards: list[float] = []
         ep_reward = 0.0
         metrics: dict[str, float] = {}
@@ -304,11 +325,11 @@ class CrossQ:
             next_act = next_act * self.act_high
 
         B = obs.shape[0]
-        cat_obs = torch.cat([obs, next_obs], dim=0)       # (2B, obs_dim)
-        cat_act = torch.cat([actions, next_act], dim=0)   # (2B, act_dim)
+        cat_obs = torch.cat([obs, next_obs], dim=0)  # (2B, obs_dim)
+        cat_act = torch.cat([actions, next_act], dim=0)  # (2B, act_dim)
 
-        q1_both = self.critic1(cat_obs, cat_act)           # (2B, 1)
-        q2_both = self.critic2(cat_obs, cat_act)           # (2B, 1)
+        q1_both = self.critic1(cat_obs, cat_act)  # (2B, 1)
+        q2_both = self.critic2(cat_obs, cat_act)  # (2B, 1)
 
         q1 = q1_both[:B].squeeze(-1)
         q1_next = q1_both[B:].squeeze(-1)
