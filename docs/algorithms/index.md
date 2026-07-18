@@ -62,6 +62,8 @@ graph TD
 | [TD3](td3.md) | Continuous only | Deterministic | High | High | Medium |
 | [SAC](sac.md) | Continuous | Stochastic | High | High | Medium |
 | CrossQ | Continuous | Stochastic (BatchRenorm, no target net) | Very high | High | Medium |
+| TQC | Continuous | Stochastic (distributional / truncated quantile critics) | Very high | High | Medium |
+| Recurrent PPO | Discrete | Stochastic (LSTM, for POMDPs) | Low | High | Medium |
 | [MPO](mpo.md) | Continuous | Stochastic | High | High | High |
 | [IMPALA](impala.md) | Discrete / Continuous | Stochastic | Medium | Medium | High |
 | [DreamerV3](dreamer.md) | Discrete / Continuous | Learned model | Very high | Medium | High |
@@ -89,7 +91,7 @@ status, exposed programmatically via `Trainer.status` and
 | Status | Meaning | Algorithms |
 |--------|---------|-----------|
 | **validated** | Convergence-tested with multi-seed evidence on standard benchmarks | PPO, SAC, TD3, DQN, A2C, TRPO |
-| **experimental** | Implemented and unit-tested, but **not** convergence-validated — APIs and results may change | VPG, IMPALA, MAPPO, MPO, DreamerV3, QMIX, Cal-QL, Diffusion Policy, Decision Transformer, AWR, RWDTP/RCDTP, PQN, CrossQ |
+| **experimental** | Implemented and unit-tested, but **not** convergence-validated — APIs and results may change | VPG, IMPALA, MAPPO, MPO, DreamerV3, QMIX, Cal-QL, Diffusion Policy, Decision Transformer, AWR, RWDTP/RCDTP, PQN, CrossQ, TQC, Recurrent PPO |
 
 > **TRPO** is validated on **CartPole-v1** (5-seed IQM = 500.0; config at
 > `benchmarks/convergence/configs/trpo_cartpole.yaml`) and confirmed learning on

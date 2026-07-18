@@ -43,12 +43,28 @@ def _load_toml(path: str | Path) -> dict[str, Any]:
         return tomllib.load(f)
 
 
+def _strip_none(data: dict[str, Any]) -> dict[str, Any]:
+    """Recursively drop keys whose value is ``None``.
+
+    TOML has no null type, so a ``None``-valued field cannot be represented.
+    We omit it; ``from_dict`` restores it from the dataclass default (which is
+    ``None`` for these fields) on read, so the round-trip is preserved.
+    """
+    return {
+        k: _strip_none(v) if isinstance(v, dict) else v
+        for k, v in data.items()
+        if v is not None
+    }
+
+
 def _write_toml(data: dict[str, Any], path: str | Path) -> None:
     """Write a dict to a TOML file.
 
     Uses ``tomli_w`` if available, otherwise falls back to a simple
-    serialiser that handles the types we actually use.
+    serialiser that handles the types we actually use.  ``None`` values are
+    stripped first — TOML has no null type, and ``tomli_w`` raises on ``None``.
     """
+    data = _strip_none(data)
     try:
         import tomli_w
 
@@ -1295,6 +1311,8 @@ _VALID_ALGORITHMS = {
     "rcdtp",
     "pqn",
     "crossq",
+    "tqc",
+    "recurrent_ppo",
 }
 _VALID_LOGGERS = {"tensorboard", "wandb", "console", None}
 _VALID_CALLBACKS = {"eval", "checkpoint", "progress", "timing", "early_stopping"}

@@ -260,6 +260,11 @@ class Trainer:
         lengths: list[int] = []
         for ep in range(n_episodes):
             obs, _ = env.reset(seed=seed + ep)
+            # Recurrent policies (e.g. RecurrentPPO) carry hidden state across
+            # predict() calls; reset it at each episode boundary so eval
+            # episodes don't leak state into one another.
+            if hasattr(self.algo, "reset_predict_state"):
+                self.algo.reset_predict_state()
             ep_reward, ep_len, done = 0.0, 0, False
             while not done:
                 if vec_normalize is not None and hasattr(vec_normalize, "normalize_obs"):
@@ -366,6 +371,8 @@ def _register_builtins() -> None:
     from rlox.algorithms.dtp import RWDTP, RCDTP
     from rlox.algorithms.pqn import PQN
     from rlox.algorithms.crossq import CrossQ
+    from rlox.algorithms.tqc import TQC
+    from rlox.algorithms.recurrent_ppo import RecurrentPPO
 
     for name, cls in [
         ("ppo", PPO),
@@ -386,6 +393,8 @@ def _register_builtins() -> None:
         ("rcdtp", RCDTP),
         ("pqn", PQN),
         ("crossq", CrossQ),
+        ("tqc", TQC),
+        ("recurrent_ppo", RecurrentPPO),
     ]:
         if name not in ALGORITHM_REGISTRY:
             ALGORITHM_REGISTRY[name] = cls
