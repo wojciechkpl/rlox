@@ -253,6 +253,19 @@ class QMIX:
         self.epsilon_decay_steps = epsilon_decay_steps
         self.seed = seed
 
+        # Seed torch/np/env RNG for reproducibility.  This MUST happen
+        # before the agent/mixing networks are constructed below so that
+        # their weight initialisation is deterministic for a given seed
+        # (precedent: pqn.py:118, crossq.py:141).  Gymnasium does not
+        # propagate `env.reset(seed=...)` to the action space's RNG, so
+        # the action space gets its own `.seed()` call here too (defensive:
+        # exploration in this algo is driven by the locally-seeded `rng` in
+        # `train()`, not `action_space.sample()`, but this keeps the pattern
+        # consistent across all gym.make-based algorithms in this codebase).
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        self.env.action_space.seed(seed)
+
         obs_dim = int(np.prod(self.env.observation_space.shape))
         act_space = self.env.action_space
         self._obs_dim = obs_dim

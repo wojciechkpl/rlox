@@ -94,6 +94,18 @@ class AWR:
         self.max_advantage = max_advantage
         self.seed = seed
 
+        # Seed torch/np/env RNG for reproducibility.  This MUST happen
+        # before the actor/critic networks are constructed below so that
+        # their weight initialisation is deterministic for a given seed
+        # (precedent: pqn.py:118, crossq.py:141).  Gymnasium does not
+        # propagate `env.reset(seed=...)` to the action space's RNG, and
+        # the `learning_starts` exploration phase in `train()` calls
+        # `action_space.sample()`, so the action space needs its own
+        # `.seed()` call here too.
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        self.env.action_space.seed(seed)
+
         obs_dim = int(np.prod(self.env.observation_space.shape))
         act_space = self.env.action_space
         self.obs_dim = obs_dim

@@ -71,6 +71,20 @@ class SAC:
         # YAMLs that include these keys don't crash on rlox SAC.
         self.train_freq = max(1, int(train_freq))
         self.gradient_steps = max(1, int(gradient_steps))
+
+        # Seed torch/np/env RNG for reproducibility.  This MUST happen
+        # before the actor/critic networks are constructed below so that
+        # their weight initialisation is deterministic for a given seed
+        # (precedent: pqn.py:118, crossq.py:141).  Gymnasium does not
+        # propagate `env.reset(seed=...)` to the action space's RNG, and
+        # the `learning_starts` exploration phase in `train()` calls
+        # `action_space.sample()`, so the action space needs its own
+        # `.seed()` call here too.
+        self.seed = seed
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        self.env.action_space.seed(seed)
+
         # ent_coef accepted for SB3-preset compatibility. rlox SAC uses
         # ``auto_entropy=True`` (learned alpha) by default; passing a
         # numeric ent_coef pins alpha to that value (auto_entropy=False).
@@ -177,7 +191,7 @@ class SAC:
         if self.collector is not None:
             return self._train_with_collector(total_timesteps)
 
-        obs, _ = self.env.reset()
+        obs, _ = self.env.reset(seed=self.seed)
         episode_rewards: list[float] = []
         ep_reward = 0.0
         metrics: dict[str, float] = {}

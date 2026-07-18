@@ -78,6 +78,19 @@ class TD3:
         self.hidden = hidden
         self.buffer_size = buffer_size
 
+        # Seed torch/np/env RNG for reproducibility.  This MUST happen
+        # before the actor/critic networks are constructed below so that
+        # their weight initialisation is deterministic for a given seed
+        # (precedent: pqn.py:118, crossq.py:141).  Gymnasium does not
+        # propagate `env.reset(seed=...)` to the action space's RNG, and
+        # the `learning_starts` exploration phase in `train()` calls
+        # `action_space.sample()`, so the action space needs its own
+        # `.seed()` call here too.
+        self.seed = seed
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        self.env.action_space.seed(seed)
+
         obs_dim = int(np.prod(self.env.observation_space.shape))
         act_dim = int(np.prod(self.env.action_space.shape))
         act_high = float(self.env.action_space.high[0])
@@ -165,7 +178,7 @@ class TD3:
         if self.collector is not None:
             return self._train_with_collector(total_timesteps)
 
-        obs, _ = self.env.reset()
+        obs, _ = self.env.reset(seed=self.seed)
         episode_rewards: list[float] = []
         ep_reward = 0.0
         metrics: dict[str, float] = {}
