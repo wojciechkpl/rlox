@@ -1,0 +1,33 @@
+# External prime-rl inference server for the single-GPU (decoupled) agentic smoke.
+# Runs the vLLM-backed policy server on ONE RTX 5090 (GPU 0), leaving headroom for
+# the colocated trainer (LoRA + activations). The orchestrator connects to this
+# server via the elastic client in smoke_1gpu.toml (localhost:8000).
+#
+# The integrated `rl` launcher assigns inference and trainer DISJOINT GPUs
+# (min 2 GPUs). Single-GPU therefore requires this decoupled topology: start
+# this server first, then run `rl @ smoke_1gpu.toml` (which omits [inference],
+# so inference=None and rl launches only the trainer+orchestrator on GPU 0).
+#
+# Launch (keep running in the background):
+#   CUDA_VISIBLE_DEVICES=0 /home/wk/prime-rl/.venv/bin/inference @ \
+#     benchmarks/agentic/primerl/infer_1gpu.toml
+#
+# NOTE: enable_lora / max_lora_rank / gpu_memory_utilization are TOP-LEVEL
+# InferenceConfig fields, so they MUST appear before any [table] header.
+
+# LoRA serving: the trainer broadcasts adapter weights to this server each step,
+# so it must accept LoRA at the same rank as the trainer (smoke_1gpu.toml rank=32).
+enable_lora = true
+max_lora_rank = 32
+
+# Throttle KV-cache hard so the colocated trainer (base 4B bf16 + LoRA + optimizer
+# + grad-checkpointed activations) fits alongside in 32 GB.
+gpu_memory_utilization = 0.40
+
+[model]
+name = "Qwen/Qwen3-4B-Instruct-2507"
+max_model_len = 1024
+enforce_eager = true          # skip CUDA-graph capture — less VRAM, faster startup for a smoke
+
+[server]
+port = 8000

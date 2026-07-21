@@ -1,8 +1,20 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{SendTimeoutError, Sender};
+
+/// A shared, thread-safe function that maps flat observations to per-env value estimates.
+pub type ValueFn = Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync>;
+
+/// A shared, thread-safe function that maps flat observations to (actions, log-probs).
+pub type ActionFn = Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync>;
+
+/// How long the collector waits on a full channel before re-checking the stop
+/// flag. Bounds shutdown latency so `stop()`/`Drop` cannot deadlock behind a
+/// blocked `send()` when the consumer has stopped draining.
+const SEND_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 use crate::env::batch::BatchSteppable;
 use crate::env::spaces::Action;
@@ -41,8 +53,8 @@ impl AsyncCollector {
         gamma: f64,
         gae_lambda: f64,
         tx: Sender<RolloutBatch>,
-        value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync>,
-        action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync>,
+        value_fn: ValueFn,
+        action_fn: ActionFn,
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop = stop_flag.clone();
@@ -200,9 +212,21 @@ impl AsyncCollector {
                     n_envs,
                 };
 
-                // Send — blocks if channel is full (backpressure)
-                if tx.send(batch).is_err() {
-                    break; // receiver dropped
+                // Send with backpressure, but stay responsive to stop(): a
+                // plain blocking send() on a full channel never re-checks the
+                // stop flag, so a stopped (non-draining) consumer would wedge
+                // the thread inside send() and make stop()/Drop join() forever.
+                // Poll with a timeout, re-checking the stop flag between tries.
+                let mut pending = Some(batch);
+                while let Some(b) = pending.take() {
+                    if stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    match tx.send_timeout(b, SEND_POLL_INTERVAL) {
+                        Ok(()) => {}
+                        Err(SendTimeoutError::Timeout(b)) => pending = Some(b),
+                        Err(SendTimeoutError::Disconnected(_)) => return, // receiver dropped
+                    }
                 }
             }
         });
@@ -254,13 +278,11 @@ mod tests {
         let pipe = Pipeline::new(4);
         let tx = pipe.sender();
 
-        let value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync> =
-            Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]); // CartPole obs_dim=4
-        let action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync> =
-            Arc::new(|obs: &[f32]| {
-                let n = obs.len() / 4;
-                (vec![0.0; n], vec![0.0; n]) // always action 0
-            });
+        let value_fn: ValueFn = Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]); // CartPole obs_dim=4
+        let action_fn: ActionFn = Arc::new(|obs: &[f32]| {
+            let n = obs.len() / 4;
+            (vec![0.0; n], vec![0.0; n]) // always action 0
+        });
 
         let mut collector = AsyncCollector::start(
             make_vec_env(2, 42),
@@ -291,13 +313,11 @@ mod tests {
         let pipe = Pipeline::new(2);
         let tx = pipe.sender();
 
-        let value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync> =
-            Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]);
-        let action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync> =
-            Arc::new(|obs: &[f32]| {
-                let n = obs.len() / 4;
-                (vec![0.0; n], vec![0.0; n])
-            });
+        let value_fn: ValueFn = Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]);
+        let action_fn: ActionFn = Arc::new(|obs: &[f32]| {
+            let n = obs.len() / 4;
+            (vec![0.0; n], vec![0.0; n])
+        });
 
         let mut collector =
             AsyncCollector::start(make_vec_env(1, 0), 4, 0.99, 0.95, tx, value_fn, action_fn);
@@ -306,18 +326,62 @@ mod tests {
         collector.stop(); // should not panic
     }
 
+    /// Regression: `stop()` must terminate even when the bounded channel is
+    /// full and the consumer never drains it. Previously the collection thread
+    /// blocked forever inside `send()` on the full channel and `stop()`'s
+    /// `join()` deadlocked (it hung the whole pytest suite for hours via the
+    /// `CandleCollector` binding). A watchdog thread bounds the wait so a
+    /// regression FAILS fast instead of hanging the test runner.
+    #[test]
+    fn test_stop_terminates_when_channel_full_and_undrained() {
+        use crossbeam_channel::bounded;
+
+        // Tiny buffer that we deliberately never drain -> the collector fills
+        // it and parks in send().
+        let pipe = Pipeline::new(1);
+        let tx = pipe.sender();
+
+        let value_fn: ValueFn = Arc::new(|obs: &[f32]| vec![0.0; obs.len() / 4]);
+        let action_fn: ActionFn = Arc::new(|obs: &[f32]| {
+            let n = obs.len() / 4;
+            (vec![0.0; n], vec![0.0; n])
+        });
+
+        let mut collector =
+            AsyncCollector::start(make_vec_env(1, 7), 4, 0.99, 0.95, tx, value_fn, action_fn);
+
+        // Let the collector fill the undrained channel and block in send().
+        thread::sleep(Duration::from_millis(200));
+
+        // Run stop() on a watchdog thread so a deadlock surfaces as a timeout,
+        // not a hung suite.
+        let (done_tx, done_rx) = bounded::<()>(1);
+        let watchdog = thread::spawn(move || {
+            collector.stop();
+            let _ = done_tx.send(());
+        });
+
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "AsyncCollector::stop() deadlocked on a full, undrained channel"
+        );
+        watchdog.join().unwrap();
+
+        // Keep the receiver alive (channel connected, send genuinely blocked on
+        // a full buffer) through the assertion above.
+        drop(pipe);
+    }
+
     #[test]
     fn test_async_collector_gae_values_are_finite() {
         let pipe = Pipeline::new(4);
         let tx = pipe.sender();
 
-        let value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync> =
-            Arc::new(|obs: &[f32]| vec![0.5; obs.len() / 4]);
-        let action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync> =
-            Arc::new(|obs: &[f32]| {
-                let n = obs.len() / 4;
-                (vec![1.0; n], vec![-0.5; n])
-            });
+        let value_fn: ValueFn = Arc::new(|obs: &[f32]| vec![0.5; obs.len() / 4]);
+        let action_fn: ActionFn = Arc::new(|obs: &[f32]| {
+            let n = obs.len() / 4;
+            (vec![1.0; n], vec![-0.5; n])
+        });
 
         let mut collector =
             AsyncCollector::start(make_vec_env(4, 42), 16, 0.99, 0.95, tx, value_fn, action_fn);

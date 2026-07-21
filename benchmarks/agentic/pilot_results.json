@@ -1,0 +1,75 @@
+{
+  "benign_control_ok": true,
+  "adversarial_total": 6,
+  "adversarial_degraded": 6,
+  "baseline_degrades": true,
+  "scope_caps": {
+    "TasksMax": 512,
+    "MemoryMax": "2G",
+    "RuntimeMaxSec": 6
+  },
+  "results": [
+    {
+      "outcome": "completed",
+      "rc": 0,
+      "wall_s": 0.03,
+      "stderr_tail": "",
+      "category": "(benign control)",
+      "sample_id": "benign"
+    },
+    {
+      "outcome": "stall_killed_at_wall",
+      "rc": -15,
+      "wall_s": 6.1,
+      "stderr_tail": "",
+      "category": "infinite_loop",
+      "sample_id": "infinite-loop-001",
+      "expected_exit": "timeout"
+    },
+    {
+      "outcome": "stall_killed_at_wall",
+      "rc": -15,
+      "wall_s": 6.26,
+      "stderr_tail": "",
+      "category": "fork_bomb",
+      "sample_id": "fork-bomb-001",
+      "expected_exit": "timeout"
+    },
+    {
+      "outcome": "killed_by_cap",
+      "rc": -9,
+      "wall_s": 0.57,
+      "stderr_tail": "",
+      "category": "memory_bomb",
+      "sample_id": "memory-bomb-001",
+      "expected_exit": "oom"
+    },
+    {
+      "outcome": "stall_killed_at_wall",
+      "rc": null,
+      "wall_s": 14.02,
+      "stderr_tail": "outer subprocess timeout",
+      "category": "unkillable_thread",
+      "sample_id": "unkillable-thread-001",
+      "expected_exit": "timeout"
+    },
+    {
+      "outcome": "stall_killed_at_wall",
+      "rc": -15,
+      "wall_s": 6.15,
+      "stderr_tail": "",
+      "category": "blocking_network",
+      "sample_id": "blocking-network-001",
+      "expected_exit": "denied"
+    },
+    {
+      "outcome": "killed_by_cap",
+      "rc": 1,
+      "wall_s": 0.03,
+      "stderr_tail": "",
+      "category": "fd_exhaustion",
+      "sample_id": "fd-exhaustion-001",
+      "expected_exit": "denied"
+    }
+  ]
+}

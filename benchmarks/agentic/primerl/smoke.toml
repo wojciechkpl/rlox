@@ -1,0 +1,53 @@
+# prime-rl smoke config for the rlox agentic benchmark.
+# Qwen3-4B-Instruct-2507 + LoRA on a single RTX 5090 (32 GB), tiny batch for a
+# fast end-to-end pipeline proof (~20 steps). Baseline vs Treatment is selected
+# via the env arg `rollout_backend` ("in_loop" | "rlox"); adversarial injection
+# via `adversarial_fraction`. Launch with:
+#   uv run --no-sync rl @ <this> --max-steps 20
+# (run_one overrides rollout_backend / adversarial_fraction / seed / wandb.name).
+
+max_steps = 20
+seq_len = 1024
+
+[ckpt]
+
+[model]
+name = "Qwen/Qwen3-4B-Instruct-2507"
+
+[wandb]
+project = "rlox-agentic-smoke"
+name = "smoke"
+
+[trainer.model]
+impl = "auto"
+
+[trainer.model.ac]          # activation checkpointing — saves activation memory
+freq = 1
+
+[trainer.model.lora]        # LoRA: train adapters only (fits 32 GB)
+rank = 32
+alpha = 64
+
+[trainer.optim]
+lr = 1e-5
+
+[orchestrator]
+batch_size = 8              # tiny for the smoke (full sweep tunes this up)
+group_size = 4
+
+[orchestrator.train.sampling]
+max_completion_tokens = 512
+
+[[orchestrator.train.env]]
+id = "rlox-verify"
+args = { rollout_backend = "in_loop", adversarial_fraction = 0.0, per_sample_timeout_secs = 5.0, group_size = 4, n_problems = 16 }
+
+[inference]
+# Single-GPU colocation: leave headroom for the trainer's weights+LoRA+activations.
+enable_lora = true
+max_lora_rank = 32
+gpu_memory_utilization = 0.40
+vllm_extra = { max_model_len = 1024 }
+
+[orchestrator.renderer]
+name = "auto"

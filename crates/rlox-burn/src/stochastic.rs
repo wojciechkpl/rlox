@@ -322,7 +322,7 @@ mod tests {
         let data: Vec<f32> = log_std.into_data().to_vec().unwrap();
         for &v in &data {
             assert!(
-                v >= LOG_STD_MIN && v <= LOG_STD_MAX,
+                (LOG_STD_MIN..=LOG_STD_MAX).contains(&v),
                 "log_std out of range: {v}"
             );
         }
@@ -344,7 +344,7 @@ mod tests {
         let (actions, _) = policy.sample_actions(&obs).unwrap();
         for &a in &actions.data {
             assert!(
-                a >= -1.0 && a <= 1.0,
+                (-1.0..=1.0).contains(&a),
                 "tanh-squashed action should be in [-1, 1]: {a}"
             );
         }
@@ -367,7 +367,7 @@ mod tests {
         );
         let actions = policy.deterministic_action(&obs).unwrap();
         for &a in &actions.data {
-            assert!(a >= -1.0 && a <= 1.0, "action out of range: {a}");
+            assert!((-1.0..=1.0).contains(&a), "action out of range: {a}");
         }
     }
 }

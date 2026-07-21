@@ -6,6 +6,9 @@ use crate::env::RLEnv;
 use crate::error::RloxError;
 use crate::seed::derive_seed;
 
+/// Per-environment raw step result: `(obs_data, reward, terminated, truncated, terminal_obs)`.
+type RawStepResult = (Vec<f32>, f64, bool, bool, Option<Vec<f32>>);
+
 /// Columnar batch of transitions from parallel stepping.
 #[derive(Debug, Clone)]
 pub struct BatchTransition {
@@ -75,10 +78,7 @@ impl VecEnv {
 
     /// Step + auto-reset all environments in parallel. Returns the raw
     /// per-environment results: `(obs_data, reward, terminated, truncated, terminal_obs)`.
-    fn step_raw(
-        &mut self,
-        actions: &[Action],
-    ) -> Result<Vec<(Vec<f32>, f64, bool, bool, Option<Vec<f32>>)>, RloxError> {
+    fn step_raw(&mut self, actions: &[Action]) -> Result<Vec<RawStepResult>, RloxError> {
         if actions.len() != self.envs.len() {
             return Err(RloxError::ShapeMismatch {
                 expected: format!("{}", self.envs.len()),
@@ -86,7 +86,7 @@ impl VecEnv {
             });
         }
 
-        let results: Vec<Result<(Vec<f32>, f64, bool, bool, Option<Vec<f32>>), RloxError>> = self
+        let results: Vec<Result<RawStepResult, RloxError>> = self
             .envs
             .par_iter_mut()
             .zip(actions.par_iter())

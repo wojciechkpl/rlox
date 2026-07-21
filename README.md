@@ -234,13 +234,15 @@ SAC HalfCheetah: rlox 10872 vs SB3 10796 — statistically identical, both beat 
 - **Asymmetric actor-critic**: `AsymmetricPolicy` for privileged critic observations (sim-to-real)
 - **Production**: callbacks, checkpointing, eval toolkit (IQM, bootstrap CI, performance profiles)
 - **NN backends**: Burn (NdArray) and Candle (CPU) for pure-Rust inference, PyTorch for training
-- **444 Rust tests, ~1094 Python tests** — comprehensive coverage
+- **Agentic-RL sandbox benchmark**: Hard-isolated sandbox (`rlox-sandbox`) for executing untrusted agent code with zero contagion. Validated on GRPO post-training: 30-step sweep shows Treatment (sandbox) survives 3/3 runs vs Baseline 1/3 at 10% adversarial injection, with quality-parity guardrail (reward 0.917 = 0.917). Includes reward-integrity protocol, seccomp+cgroup+namespace containment, and adversarial corpus regression tests.
+- **~670 Rust tests, ~1100+ Python tests** — comprehensive coverage across core, sandbox, and the agentic harness
 
 ## Tutorials & Documentation
 
 | Guide | Description |
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation, first training run, basic API |
+| [Agentic-RL Sandbox Benchmark](docs/tutorials/agentic-sandbox-benchmark.md) | Hard-isolation sandbox for untrusted agent code, P3 containment study, running the sweep |
 | [Custom Rewards & Training Loops](docs/tutorials/custom-rewards-and-training-loops.md) | Reward shaping, GRPO reward functions, custom algorithms |
 | [Python Guide](docs/python-guide.md) | Python API reference and patterns |
 | [Rust Guide](docs/rust-guide.md) | Rust crate architecture and extending in Rust |
@@ -251,10 +253,10 @@ SAC HalfCheetah: rlox 10872 vs SB3 10796 — statistically identical, both beat 
 ## Running Tests
 
 ```bash
-# Rust tests (444 tests across all crates)
+# Rust tests across all crates (rlox-core, rlox-sandbox, rlox-rl-ops, etc.)
 cargo test --workspace
 
-# Python tests (~1094 tests, after maturin develop)
+# Python tests (after maturin develop)
 pip install -e ".[all]"
 pytest tests/python/ -q
 
@@ -263,9 +265,13 @@ pytest tests/python/ -m "not slow" -q
 
 # Single crate
 cargo test --package rlox-core
+cargo test --package rlox-sandbox
 
 # All tests (Rust + Python)
 ./scripts/test.sh
+
+# Agentic-RL benchmark (single-GPU GRPO on Linux with cgroup v2)
+bash benchmarks/agentic/repro.sh --setup-only
 
 # Full benchmark suite (rlox vs TorchRL vs SB3)
 .venv/bin/python benchmarks/run_all.py
@@ -277,6 +283,8 @@ cargo test --package rlox-core
 crates/
   rlox-core/       Pure Rust: envs, buffers (ring, mmap, priority), GAE,
                    V-trace, GRPO, pipeline (crossbeam), sequence packing
+  rlox-rl-ops/     Estimator-agnostic advantage + token-KL ops (GRPO, DAPO)
+  rlox-sandbox/    Hard-isolation sandbox for untrusted code (agentic-benchmark)
   rlox-nn/         RL algorithm traits (ActorCritic, QFunction, etc.)
   rlox-burn/       Burn backend (Autodiff<NdArray>)
   rlox-candle/     Candle backend (CPU)
@@ -288,7 +296,9 @@ python/rlox/
   llm/             LLM environment, reward model serving
   *.py             Collectors, configs, callbacks, policies, trainers,
                    evaluation toolkit, diagnostics, checkpointing
-benchmarks/        Three-framework benchmark suite + convergence tests
+benchmarks/
+  convergence/     Multi-seed RL convergence suite (5 seeds per cell, IQM + CI)
+  agentic/         GRPO agentic-RL validation benchmark (P3 containment study)
 tests/python/      Python integration & benchmark TDD tests
 docs/              Guides, tutorials, benchmark methodology
 ```

@@ -6,3 +6,10 @@ publish = false
 
 [dependencies]
 rlox-core = { path = "../../crates/rlox-core" }
+rlox-rl-ops = { path = "../../crates/rlox-rl-ops" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rlox-sandbox = { path = "../../crates/rlox-sandbox" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+uuid = { version = "1", features = ["v4"] }
+libc = "0.2"

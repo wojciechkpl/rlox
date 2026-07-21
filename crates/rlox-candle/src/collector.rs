@@ -36,6 +36,12 @@ use rlox_nn::{ActorCritic, TensorData};
 
 use crate::actor_critic::CandleActorCritic;
 
+/// A shared, thread-safe function that maps flat observations to per-env value estimates.
+type ValueFn = Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync>;
+
+/// A shared, thread-safe function that maps flat observations to (actions, log-probs).
+type ActionFn = Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync>;
+
 /// Shared policy wrapper that allows the collection thread to read the policy
 /// while the main thread updates weights.
 pub struct SharedPolicy {
@@ -83,35 +89,30 @@ impl SharedPolicy {
 pub fn make_candle_callbacks(
     policy: Arc<RwLock<CandleActorCritic>>,
     obs_dim: usize,
-) -> (
-    Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync>,
-    Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync>,
-) {
+) -> (ActionFn, ValueFn) {
     let policy_act = policy.clone();
     let policy_val = policy;
 
-    let action_fn: Arc<dyn Fn(&[f32]) -> (Vec<f32>, Vec<f64>) + Send + Sync> =
-        Arc::new(move |obs_flat: &[f32]| {
-            let n_envs = obs_flat.len() / obs_dim;
-            let obs = TensorData::new(obs_flat.to_vec(), vec![n_envs, obs_dim]);
+    let action_fn: ActionFn = Arc::new(move |obs_flat: &[f32]| {
+        let n_envs = obs_flat.len() / obs_dim;
+        let obs = TensorData::new(obs_flat.to_vec(), vec![n_envs, obs_dim]);
 
-            let p = policy_act.read().unwrap();
-            let output = p.act(&obs).expect("Candle act() failed");
+        let p = policy_act.read().unwrap();
+        let output = p.act(&obs).expect("Candle act() failed");
 
-            let actions = output.actions.data;
-            let log_probs: Vec<f64> = output.log_probs.data.iter().map(|&x| x as f64).collect();
-            (actions, log_probs)
-        });
+        let actions = output.actions.data;
+        let log_probs: Vec<f64> = output.log_probs.data.iter().map(|&x| x as f64).collect();
+        (actions, log_probs)
+    });
 
-    let value_fn: Arc<dyn Fn(&[f32]) -> Vec<f64> + Send + Sync> =
-        Arc::new(move |obs_flat: &[f32]| {
-            let n_envs = obs_flat.len() / obs_dim;
-            let obs = TensorData::new(obs_flat.to_vec(), vec![n_envs, obs_dim]);
+    let value_fn: ValueFn = Arc::new(move |obs_flat: &[f32]| {
+        let n_envs = obs_flat.len() / obs_dim;
+        let obs = TensorData::new(obs_flat.to_vec(), vec![n_envs, obs_dim]);
 
-            let p = policy_val.read().unwrap();
-            let values = p.value(&obs).expect("Candle value() failed");
-            values.data.iter().map(|&x| x as f64).collect()
-        });
+        let p = policy_val.read().unwrap();
+        let values = p.value(&obs).expect("Candle value() failed");
+        values.data.iter().map(|&x| x as f64).collect()
+    });
 
     (action_fn, value_fn)
 }

@@ -64,6 +64,8 @@ impl HERBuffer {
     /// * `desired_goal_start` - index within obs where desired goal starts
     /// * `strategy` - relabeling strategy
     /// * `goal_tolerance` - tolerance for sparse reward computation
+    // All 8 params are distinct required dimensions/config for a HER buffer; no natural grouping without breaking the public API.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         capacity: usize,
         obs_dim: usize,

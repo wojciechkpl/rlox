@@ -263,17 +263,18 @@ class AWR:
             "actor_loss": actor_loss.item(),
         }
 
-    def predict(self, obs, deterministic: bool = True):
+    def predict(self, obs: np.ndarray, deterministic: bool = True) -> np.ndarray | int:
         """Return action for given observation."""
         if not isinstance(obs, torch.Tensor):
             obs = torch.as_tensor(np.asarray(obs), dtype=torch.float32)
         if obs.dim() == 1:
             obs = obs.unsqueeze(0)
         with torch.no_grad():
-            logits = self.policy.actor(obs)
-            if hasattr(self.policy, "log_std"):
-                return logits.squeeze(0).numpy()
-            return logits.argmax(dim=-1).item()
+            if self.discrete:
+                logits = self.actor(obs)
+                return logits.argmax(dim=-1).item()
+            else:
+                return self.actor(obs).squeeze(0).numpy()
 
     def save(self, path: str) -> None:
         """Save training checkpoint."""

@@ -1,226 +1,36 @@
-macro_rules! impl_kl_ops {
-    ($mod_name:ident, $float:ty) => {
-        pub mod $mod_name {
-            use crate::error::RloxError;
+//! LLM advantage and KL ops — forwarding re-exports from `rlox-rl-ops`.
+//!
+//! The implementations live in `rlox-rl-ops` so that `rlox-sandbox` can depend
+//! on that slim crate without pulling in all of `rlox-core`.  Everything that
+//! was previously defined here is still **publicly accessible under the same
+//! path** (`rlox_core::llm::ops::*`, `rlox_core::llm::ops::f32_ops::*`, etc.)
+//! so existing callers — including `rlox-python` PyO3 bindings — compile and
+//! behave identically without any change.
+//!
+//! The only item that remains defined here rather than re-exported is
+//! [`DPOPair`], which is a training-plane data container unrelated to advantage
+//! estimation.
 
-            /// GRPO group advantage: `(reward - mean) / std`.
-            /// Returns zeros if std < 1e-8.
-            pub fn compute_group_advantages(rewards: &[$float]) -> Vec<$float> {
-                if rewards.is_empty() {
-                    return Vec::new();
-                }
+// ---------------------------------------------------------------------------
+// Re-export everything from rlox-rl-ops::kl (the macro-generated f64 + f32
+// sub-modules and the module-level f64 re-exports).
+// ---------------------------------------------------------------------------
 
-                let n = rewards.len() as $float;
-                let mean = rewards.iter().sum::<$float>() / n;
-                let variance = rewards
-                    .iter()
-                    .map(|&r| (r - mean) * (r - mean))
-                    .sum::<$float>()
-                    / n;
-                let std = variance.sqrt();
+// f64 sub-module — keep accessible as `rlox_core::llm::ops::f64_ops`.
+pub use rlox_rl_ops::kl::f64_ops;
 
-                if std < 1e-8 as $float {
-                    return vec![0.0 as $float; rewards.len()];
-                }
+// f32 sub-module — keep accessible as `rlox_core::llm::ops::f32_ops`.
+pub use rlox_rl_ops::kl::f32_ops;
 
-                let inv_std = 1.0 as $float / std;
-                rewards.iter().map(|&r| (r - mean) * inv_std).collect()
-            }
+// Module-level f64 convenience re-exports (same as before: `pub use f64_ops::*`).
+pub use rlox_rl_ops::kl::{
+    compute_batch_group_advantages, compute_batch_token_kl, compute_batch_token_kl_schulman,
+    compute_group_advantages, compute_token_kl, compute_token_kl_schulman,
+};
 
-            /// Token-level KL divergence: `sum(exp(log_p) * (log_p - log_q))`.
-            pub fn compute_token_kl(
-                log_probs_policy: &[$float],
-                log_probs_ref: &[$float],
-            ) -> Result<$float, RloxError> {
-                if log_probs_policy.len() != log_probs_ref.len() {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: format!("len={}", log_probs_policy.len()),
-                        got: format!("len={}", log_probs_ref.len()),
-                    });
-                }
-
-                Ok(log_probs_policy
-                    .iter()
-                    .zip(log_probs_ref.iter())
-                    .map(|(&log_p, &log_q)| log_p.exp() * (log_p - log_q))
-                    .sum())
-            }
-
-            /// Batched GRPO group advantages: process all groups in a single call.
-            ///
-            /// `rewards` is a flat slice of length `n_prompts * group_size`.
-            /// Returns a Vec of the same length with per-group z-score normalisation.
-            pub fn compute_batch_group_advantages(
-                rewards: &[$float],
-                group_size: usize,
-            ) -> Result<Vec<$float>, RloxError> {
-                if group_size == 0 {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: "group_size > 0".to_string(),
-                        got: "0".to_string(),
-                    });
-                }
-                if rewards.len() % group_size != 0 {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: format!("len divisible by {group_size}"),
-                        got: format!("len={}", rewards.len()),
-                    });
-                }
-
-                const PAR_ELEMENT_THRESHOLD: usize = 4096;
-                if rewards.len() >= PAR_ELEMENT_THRESHOLD {
-                    use rayon::prelude::*;
-                    let out: Vec<$float> = rewards
-                        .par_chunks_exact(group_size)
-                        .flat_map_iter(|group| compute_group_advantages(group))
-                        .collect();
-                    Ok(out)
-                } else {
-                    let mut out = Vec::with_capacity(rewards.len());
-                    for group in rewards.chunks_exact(group_size) {
-                        out.extend_from_slice(&compute_group_advantages(group));
-                    }
-                    Ok(out)
-                }
-            }
-
-            /// Token-level KL divergence using the Schulman (2020) estimator:
-            /// `sum(exp(log_p - log_q) - (log_p - log_q) - 1)`.
-            ///
-            /// This is the estimator used by TRL (HuggingFace). It is unbiased and
-            /// numerically more stable than the exact `exp(log_p) * (log_p - log_q)`.
-            pub fn compute_token_kl_schulman(
-                log_probs_policy: &[$float],
-                log_probs_ref: &[$float],
-            ) -> Result<$float, RloxError> {
-                if log_probs_policy.len() != log_probs_ref.len() {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: format!("len={}", log_probs_policy.len()),
-                        got: format!("len={}", log_probs_ref.len()),
-                    });
-                }
-
-                Ok(log_probs_policy
-                    .iter()
-                    .zip(log_probs_ref.iter())
-                    .map(|(&log_p, &log_q)| {
-                        let r = log_p - log_q;
-                        r.exp() - r - 1.0 as $float
-                    })
-                    .sum())
-            }
-
-            /// Batched token-level KL divergence: process all sequences in a single call.
-            ///
-            /// `log_probs_policy` and `log_probs_ref` are flat slices of length `batch * seq_len`.
-            /// Returns a Vec of length `batch` with per-sequence KL values.
-            pub fn compute_batch_token_kl(
-                log_probs_policy: &[$float],
-                log_probs_ref: &[$float],
-                seq_len: usize,
-            ) -> Result<Vec<$float>, RloxError> {
-                if log_probs_policy.len() != log_probs_ref.len() {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: format!("len={}", log_probs_policy.len()),
-                        got: format!("len={}", log_probs_ref.len()),
-                    });
-                }
-                if seq_len == 0 {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: "seq_len > 0".to_string(),
-                        got: "0".to_string(),
-                    });
-                }
-                if log_probs_policy.len() % seq_len != 0 {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: format!("len divisible by {seq_len}"),
-                        got: format!("len={}", log_probs_policy.len()),
-                    });
-                }
-
-                const PAR_ELEMENT_THRESHOLD: usize = 4096;
-                let batch_size = log_probs_policy.len() / seq_len;
-
-                let kl_for_seq = |i: usize| -> $float {
-                    let off = i * seq_len;
-                    let ps = &log_probs_policy[off..off + seq_len];
-                    let qs = &log_probs_ref[off..off + seq_len];
-                    ps.iter()
-                        .zip(qs.iter())
-                        .map(|(&log_p, &log_q)| log_p.exp() * (log_p - log_q))
-                        .sum()
-                };
-
-                let out = if log_probs_policy.len() >= PAR_ELEMENT_THRESHOLD {
-                    use rayon::prelude::*;
-                    (0..batch_size).into_par_iter().map(kl_for_seq).collect()
-                } else {
-                    (0..batch_size).map(kl_for_seq).collect()
-                };
-                Ok(out)
-            }
-
-            /// Batched token-level KL divergence using the Schulman (2020) estimator.
-            ///
-            /// `log_probs_policy` and `log_probs_ref` are flat slices of length `batch * seq_len`.
-            /// Returns a Vec of length `batch` with per-sequence KL values.
-            pub fn compute_batch_token_kl_schulman(
-                log_probs_policy: &[$float],
-                log_probs_ref: &[$float],
-                seq_len: usize,
-            ) -> Result<Vec<$float>, RloxError> {
-                if log_probs_policy.len() != log_probs_ref.len() {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: format!("len={}", log_probs_policy.len()),
-                        got: format!("len={}", log_probs_ref.len()),
-                    });
-                }
-                if seq_len == 0 {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: "seq_len > 0".to_string(),
-                        got: "0".to_string(),
-                    });
-                }
-                if log_probs_policy.len() % seq_len != 0 {
-                    return Err(RloxError::ShapeMismatch {
-                        expected: format!("len divisible by {seq_len}"),
-                        got: format!("len={}", log_probs_policy.len()),
-                    });
-                }
-
-                const PAR_ELEMENT_THRESHOLD: usize = 4096;
-                let batch_size = log_probs_policy.len() / seq_len;
-
-                let kl_for_seq = |i: usize| -> $float {
-                    let off = i * seq_len;
-                    let ps = &log_probs_policy[off..off + seq_len];
-                    let qs = &log_probs_ref[off..off + seq_len];
-                    ps.iter()
-                        .zip(qs.iter())
-                        .map(|(&log_p, &log_q)| {
-                            let r = log_p - log_q;
-                            r.exp() - r - 1.0 as $float
-                        })
-                        .sum()
-                };
-
-                let out = if log_probs_policy.len() >= PAR_ELEMENT_THRESHOLD {
-                    use rayon::prelude::*;
-                    (0..batch_size).into_par_iter().map(kl_for_seq).collect()
-                } else {
-                    (0..batch_size).map(kl_for_seq).collect()
-                };
-                Ok(out)
-            }
-        }
-    };
-}
-
-impl_kl_ops!(f64_ops, f64);
-impl_kl_ops!(f32_ops, f32);
-
-// Re-export f64 versions at module level for backward compatibility.
-pub use f64_ops::*;
+// ---------------------------------------------------------------------------
+// DPOPair — stays in rlox-core (training-plane data container).
+// ---------------------------------------------------------------------------
 
 /// A DPO preference pair holding tokenized prompt, chosen, and rejected sequences.
 #[derive(Debug, Clone)]

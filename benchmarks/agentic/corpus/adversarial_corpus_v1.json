@@ -1,0 +1,48 @@
+{
+  "version": "v1",
+  "sha256": "256a3c99e1463fdca22c4134a4b59760f7bc0b6e0cc128b54ffc141fe63ca145",
+  "samples": [
+    {
+      "id": "infinite-loop-001",
+      "category": "infinite_loop",
+      "language": "python",
+      "code": "while True:\n    pass\n",
+      "expected_exit": "timeout"
+    },
+    {
+      "id": "fork-bomb-001",
+      "category": "fork_bomb",
+      "language": "python",
+      "code": "import os\nwhile True:\n    try:\n        os.fork()\n    except Exception:\n        pass\n",
+      "expected_exit": "timeout"
+    },
+    {
+      "id": "memory-bomb-001",
+      "category": "memory_bomb",
+      "language": "python",
+      "code": "x = bytearray()\nwhile True:\n    x += bytearray(10 * 1024 * 1024)\n",
+      "expected_exit": "oom"
+    },
+    {
+      "id": "unkillable-thread-001",
+      "category": "unkillable_thread",
+      "language": "python",
+      "code": "import signal\nimport time\n\ndef noop(s, f):\n    pass\n\nsignal.signal(signal.SIGTERM, noop)\nsignal.signal(signal.SIGINT, noop)\nsignal.signal(signal.SIGHUP, noop)\nwhile True:\n    time.sleep(0.05)\n",
+      "expected_exit": "timeout"
+    },
+    {
+      "id": "blocking-network-001",
+      "category": "blocking_network",
+      "language": "python",
+      "code": "import socket\ntry:\n    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n    s.connect(('8.8.8.8', 80))\nexcept Exception as e:\n    import sys\n    sys.exit(1)\n",
+      "expected_exit": "denied"
+    },
+    {
+      "id": "fd-exhaustion-001",
+      "category": "fd_exhaustion",
+      "language": "python",
+      "code": "import os\nimport sys\nfds = []\ntry:\n    while True:\n        fd = os.open('/dev/null', os.O_RDONLY)\n        fds.append(fd)\nexcept OSError:\n    sys.exit(1)\n",
+      "expected_exit": "denied"
+    }
+  ]
+}

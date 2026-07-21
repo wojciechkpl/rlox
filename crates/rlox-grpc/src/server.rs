@@ -89,6 +89,28 @@ impl EnvService for EnvWorker {
 
         let flat_obs: Vec<f32> = batch.obs.into_iter().flatten().collect();
 
+        // Encode terminal observations: flatten into a contiguous buffer
+        // (zero-padded for envs without a terminal obs) plus a boolean mask.
+        let has_terminal_obs: Vec<bool> = batch.terminal_obs.iter().map(|t| t.is_some()).collect();
+        let mut flat_terminal_obs: Vec<f32> = Vec::with_capacity(num_envs * obs_dim);
+        for slot in batch.terminal_obs {
+            match slot {
+                // A present terminal obs must match obs_dim exactly; treat a
+                // mismatch as an invariant violation rather than silently
+                // truncating or zero-padding real observation data.
+                Some(obs) => {
+                    if obs.len() != obs_dim {
+                        return Err(Status::internal(format!(
+                            "terminal_obs has len {} but expected obs_dim {obs_dim}",
+                            obs.len()
+                        )));
+                    }
+                    flat_terminal_obs.extend_from_slice(&obs);
+                }
+                None => flat_terminal_obs.extend(std::iter::repeat_n(0.0f32, obs_dim)),
+            }
+        }
+
         Ok(Response::new(StepResponse {
             obs: flat_obs,
             rewards: batch.rewards,
@@ -96,6 +118,8 @@ impl EnvService for EnvWorker {
             truncated: batch.truncated,
             obs_dim: obs_dim as u32,
             num_envs: num_envs as u32,
+            terminal_obs: flat_terminal_obs,
+            has_terminal_obs,
         }))
     }
 

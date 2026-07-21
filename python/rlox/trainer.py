@@ -15,6 +15,7 @@ Example
 from __future__ import annotations
 
 import inspect
+import warnings
 from typing import Any
 
 from rlox.callbacks import Callback, CallbackList
@@ -73,6 +74,47 @@ def resolve_env_id(env_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Algorithm status
+# ---------------------------------------------------------------------------
+
+ALGORITHM_STATUSES: frozenset[str] = frozenset({"validated", "experimental"})
+
+# Algorithms that have passed convergence validation (SB3 parity, multi-seed).
+# Everything else defaults to "experimental".
+_VALIDATED: frozenset[str] = frozenset({"ppo", "sac", "td3", "dqn", "a2c", "trpo"})
+
+# Populated after _register_builtins() runs (see bottom of module).
+ALGORITHM_STATUS: dict[str, str] = {}
+
+
+def algorithm_status(name: str) -> str:
+    """Return the maturity status for a registered algorithm name.
+
+    Parameters
+    ----------
+    name : str
+        Algorithm name (case-insensitive).
+
+    Returns
+    -------
+    str
+        ``"validated"`` or ``"experimental"``.
+
+    Raises
+    ------
+    ValueError
+        If *name* is not registered.
+    """
+    key = name.lower()
+    if key not in ALGORITHM_STATUS:
+        known = ", ".join(sorted(ALGORITHM_STATUS))
+        raise ValueError(
+            f"Unknown algorithm {name!r}. Known algorithms: {known}"
+        )
+    return ALGORITHM_STATUS[key]
+
+
+# ---------------------------------------------------------------------------
 # Unified Trainer
 # ---------------------------------------------------------------------------
 
@@ -112,7 +154,7 @@ class Trainer:
         # Resolve custom env: register with gymnasium if from plugin registry
         env = resolve_env_id(env)
 
-        # Resolve algorithm class
+        # Resolve algorithm class and determine status/label
         if isinstance(algorithm, str):
             algo_cls = ALGORITHM_REGISTRY.get(algorithm.lower())
             if algo_cls is None:
@@ -120,8 +162,23 @@ class Trainer:
                     f"Unknown algorithm {algorithm!r}. "
                     f"Registered: {sorted(ALGORITHM_REGISTRY)}"
                 )
+            self._algo_label: str = algorithm.lower()
+            self._status: str = ALGORITHM_STATUS.get(
+                self._algo_label, "experimental"
+            )
+            if self._status == "experimental":
+                validated_list = ", ".join(sorted(_VALIDATED))
+                warnings.warn(
+                    f"Algorithm {self._algo_label!r} is experimental: implemented "
+                    f"but not convergence-validated. "
+                    f"Validated algorithms: {validated_list}.",
+                    UserWarning,
+                    stacklevel=2,
+                )
         else:
             algo_cls = algorithm
+            self._algo_label = algorithm.__name__
+            self._status = "experimental"
 
         # Build algorithm -- inspect __init__ to pass only accepted params
         algo_kwargs: dict[str, Any] = {"env_id": env, "seed": seed}
@@ -142,6 +199,17 @@ class Trainer:
         if logger is not None and not _accepts_param(algo_cls, "logger"):
             if hasattr(self.algo, "logger"):
                 self.algo.logger = logger
+
+    @property
+    def status(self) -> str:
+        """Maturity status of the algorithm: ``'validated'`` or ``'experimental'``."""
+        return getattr(self, "_status", "experimental")
+
+    def __repr__(self) -> str:
+        label = getattr(self, "_algo_label", "unknown")
+        st = getattr(self, "_status", "experimental")
+        env = getattr(self, "env", "unknown")
+        return f"Trainer(algorithm={label!r}, env={env!r}, status={st!r})"
 
     def train(self, total_timesteps: int) -> dict[str, float]:
         """Run training and return metrics dict."""
@@ -258,14 +326,20 @@ class Trainer:
                     f"Unknown algorithm {algorithm!r}. "
                     f"Registered: {sorted(ALGORITHM_REGISTRY)}"
                 )
+            algo_label: str = algorithm.lower()
+            algo_status: str = ALGORITHM_STATUS.get(algo_label, "experimental")
         else:
             algo_cls = algorithm
+            algo_label = algorithm.__name__
+            algo_status = "experimental"
 
         trainer = object.__new__(cls)
         trainer.algo = algo_cls.from_checkpoint(path, env_id=env)
         trainer.env = env or trainer.algo.env_id
         trainer._callbacks = CallbackList(None)
         trainer._logger = None
+        trainer._algo_label = algo_label
+        trainer._status = algo_status
         return trainer
 
 
@@ -290,6 +364,8 @@ def _register_builtins() -> None:
     from rlox.algorithms.diffusion_policy import DiffusionPolicy
     from rlox.algorithms.mpo import MPO
     from rlox.algorithms.dtp import RWDTP, RCDTP
+    from rlox.algorithms.pqn import PQN
+    from rlox.algorithms.crossq import CrossQ
 
     for name, cls in [
         ("ppo", PPO),
@@ -308,9 +384,21 @@ def _register_builtins() -> None:
         ("mpo", MPO),
         ("rwdtp", RWDTP),
         ("rcdtp", RCDTP),
+        ("pqn", PQN),
+        ("crossq", CrossQ),
     ]:
         if name not in ALGORITHM_REGISTRY:
             ALGORITHM_REGISTRY[name] = cls
 
 
 _register_builtins()
+
+# Build the status mapping now that the registry is fully populated.
+# Any algorithm not in _VALIDATED defaults to "experimental", so future
+# registrations automatically satisfy the completeness invariant.
+ALGORITHM_STATUS.update(
+    {
+        name: ("validated" if name in _VALIDATED else "experimental")
+        for name in ALGORITHM_REGISTRY
+    }
+)

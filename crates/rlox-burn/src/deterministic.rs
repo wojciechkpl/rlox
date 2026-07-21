@@ -276,7 +276,7 @@ mod tests {
         let data: Vec<f32> = actions.into_data().to_vec().unwrap();
         for &a in &data {
             assert!(
-                a >= -2.0 && a <= 2.0,
+                (-2.0..=2.0).contains(&a),
                 "action should be in [-max_action, max_action]: {a}"
             );
         }

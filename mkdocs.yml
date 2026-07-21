@@ -149,6 +149,7 @@ nav:
     - Math Reference: math-reference.md
   - Tutorials:
     - Policy Gradient Fundamentals: tutorials/policy-gradient-fundamentals.md
+    - Agentic-RL Sandbox Benchmark: tutorials/agentic-sandbox-benchmark.md
     - Custom Components: tutorials/custom-components.md
     - Custom Rewards & Training Loops: tutorials/custom-rewards-and-training-loops.md
     - Migrating from SB3: tutorials/migration-sb3.md

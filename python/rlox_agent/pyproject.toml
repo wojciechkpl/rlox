@@ -1,0 +1,28 @@
+[project]
+name = "rlox-agent"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.25",
+]
+
+[project.optional-dependencies]
+verifiers = ["verifiers>=0.1.15.dev0", "datasets>=2.14"]
+torch = ["rlox"]  # optional: rlox wheel from Maturin
+agentic = ["tomli-w>=1.0"]  # prime-rl TOML rendering (Step 8 launcher)
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# The package source directory is the parent of this pyproject.toml.
+# python/rlox_agent/ is the project root; the rlox_agent Python package is
+# directly inside it (i.e. python/rlox_agent/__init__.py).
+# Setting sources makes hatchling look for packages one level up so that
+# `rlox_agent` (the package) is found at python/rlox_agent/ relative to
+# the parent directory python/.
+sources = [".."]
+
+[tool.hatch.build.targets.wheel]
+packages = ["rlox_agent"]

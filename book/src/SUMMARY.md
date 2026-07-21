@@ -13,6 +13,7 @@
 
 # Tutorials
 
+- [Agentic-RL Sandbox Benchmark](tutorials/agentic-sandbox-benchmark.md)
 - [Custom Rewards & Training Loops](tutorials/custom-rewards-and-training-loops.md)
 
 # Architecture

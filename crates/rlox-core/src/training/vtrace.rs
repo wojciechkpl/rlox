@@ -14,6 +14,8 @@ use crate::error::RloxError;
 /// is terminal (`dones[n-1] == 1.0`).
 ///
 /// Returns `(vs, pg_advantages)`.
+// V-trace requires 4 parallel slices + 4 scalar hyperparams; each is an independent math arg.
+#[allow(clippy::too_many_arguments)]
 pub fn compute_vtrace(
     log_rhos: &[f32],
     rewards: &[f32],
