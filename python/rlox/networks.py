@@ -256,13 +256,18 @@ class BatchRenorm1d(nn.Module):
             # Progress in (0, 1] after warmup starts.
             progress = min(
                 1.0,
-                (self.step_count.item() - self.warmup_steps) / max(self.warmup_steps, 1),
+                (self.step_count.item() - self.warmup_steps)
+                / max(self.warmup_steps, 1),
             )
             r_max = 1.0 + progress * (self._R_MAX - 1.0)
             d_max = progress * self._D_MAX
 
             r = (batch_std / running_std).clamp(1.0 / r_max, r_max).detach()
-            d = ((batch_mean - self.running_mean) / running_std).clamp(-d_max, d_max).detach()
+            d = (
+                ((batch_mean - self.running_mean) / running_std)
+                .clamp(-d_max, d_max)
+                .detach()
+            )
 
         # Normalise with batch stats then apply renorm correction.
         x_hat = (x - batch_mean) / batch_std * r + d
@@ -270,8 +275,12 @@ class BatchRenorm1d(nn.Module):
 
         # Update running statistics with EMA.
         with torch.no_grad():
-            self.running_mean.add_(self.momentum * (batch_mean.detach() - self.running_mean))
-            self.running_var.add_(self.momentum * (batch_var.detach() - self.running_var))
+            self.running_mean.add_(
+                self.momentum * (batch_mean.detach() - self.running_mean)
+            )
+            self.running_var.add_(
+                self.momentum * (batch_var.detach() - self.running_var)
+            )
             self.step_count.add_(1)
 
         return out
@@ -321,10 +330,20 @@ class BNQNetwork(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(in_dim, hidden),
             nn.ReLU(),
-            BatchRenorm1d(hidden, momentum=bn_momentum, eps=bn_eps, warmup_steps=renorm_warmup_steps),
+            BatchRenorm1d(
+                hidden,
+                momentum=bn_momentum,
+                eps=bn_eps,
+                warmup_steps=renorm_warmup_steps,
+            ),
             nn.Linear(hidden, hidden),
             nn.ReLU(),
-            BatchRenorm1d(hidden, momentum=bn_momentum, eps=bn_eps, warmup_steps=renorm_warmup_steps),
+            BatchRenorm1d(
+                hidden,
+                momentum=bn_momentum,
+                eps=bn_eps,
+                warmup_steps=renorm_warmup_steps,
+            ),
             nn.Linear(hidden, 1),
         )
 

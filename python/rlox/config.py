@@ -43,12 +43,28 @@ def _load_toml(path: str | Path) -> dict[str, Any]:
         return tomllib.load(f)
 
 
+def _strip_none(data: dict[str, Any]) -> dict[str, Any]:
+    """Recursively drop keys whose value is ``None``.
+
+    TOML has no null type, so a ``None``-valued field cannot be represented.
+    We omit it; ``from_dict`` restores it from the dataclass default (which is
+    ``None`` for these fields) on read, so the round-trip is preserved.
+    """
+    return {
+        k: _strip_none(v) if isinstance(v, dict) else v
+        for k, v in data.items()
+        if v is not None
+    }
+
+
 def _write_toml(data: dict[str, Any], path: str | Path) -> None:
     """Write a dict to a TOML file.
 
     Uses ``tomli_w`` if available, otherwise falls back to a simple
-    serialiser that handles the types we actually use.
+    serialiser that handles the types we actually use.  ``None`` values are
+    stripped first — TOML has no null type, and ``tomli_w`` raises on ``None``.
     """
+    data = _strip_none(data)
     try:
         import tomli_w
 
@@ -478,6 +494,7 @@ class DQNConfig(ConfigMixin):
 # ---------------------------------------------------------------------------
 # Top-level training config (Layer 2)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class MAPPOConfig(ConfigMixin):
@@ -1124,9 +1141,7 @@ class DTPConfig(ConfigMixin):
 
     def __post_init__(self):
         if self.method not in ("rwdtp", "rcdtp"):
-            raise ValueError(
-                f"method must be 'rwdtp' or 'rcdtp', got {self.method!r}"
-            )
+            raise ValueError(f"method must be 'rwdtp' or 'rcdtp', got {self.method!r}")
         _validate_min("n_trees", self.n_trees, 1)
         _validate_min("max_depth", self.max_depth, 1)
         _validate_positive("learning_rate_xgb", self.learning_rate_xgb)
@@ -1217,6 +1232,13 @@ class CrossQConfig(ConfigMixin):
     ----------
     learning_rate : float
         Adam learning rate for all optimisers (default 1e-3).
+    adam_betas : tuple[float, float]
+        Adam ``(beta1, beta2)`` coefficients for all four optimisers
+        (default ``(0.5, 0.999)``, NOT torch's ``(0.9, 0.999)`` default).
+        CrossQ's BatchRenorm critics destabilise under high Adam
+        first-moment momentum; see
+        docs/plans/crossq-convergence-fix-2026-07-18.md for the controlled
+        ablation that pinned this default.
     buffer_size : int
         Replay buffer capacity (default 1_000_000).
     batch_size : int
@@ -1242,6 +1264,7 @@ class CrossQConfig(ConfigMixin):
     """
 
     learning_rate: float = 1e-3
+    adam_betas: tuple[float, float] = (0.5, 0.999)
     buffer_size: int = 1_000_000
     batch_size: int = 256
     gamma: float = 0.99
@@ -1260,9 +1283,37 @@ class CrossQConfig(ConfigMixin):
         _validate_min("batch_size", self.batch_size, 1)
         _validate_min("policy_delay", self.policy_delay, 1)
         _validate_min("renorm_warmup_steps", self.renorm_warmup_steps, 0)
+        if not (
+            len(self.adam_betas) == 2 and all(0.0 <= b < 1.0 for b in self.adam_betas)
+        ):
+            raise ValueError(
+                f"adam_betas must be a 2-tuple of floats in [0.0, 1.0), "
+                f"got {self.adam_betas!r}."
+            )
 
 
-_VALID_ALGORITHMS = {"ppo", "sac", "dqn", "td3", "a2c", "mappo", "dreamer", "impala", "dt", "qmix", "calql", "trpo", "diffusion", "mpo", "rwdtp", "rcdtp", "pqn", "crossq"}
+_VALID_ALGORITHMS = {
+    "ppo",
+    "sac",
+    "dqn",
+    "td3",
+    "a2c",
+    "mappo",
+    "dreamer",
+    "impala",
+    "dt",
+    "qmix",
+    "calql",
+    "trpo",
+    "diffusion",
+    "mpo",
+    "rwdtp",
+    "rcdtp",
+    "pqn",
+    "crossq",
+    "tqc",
+    "recurrent_ppo",
+}
 _VALID_LOGGERS = {"tensorboard", "wandb", "console", None}
 _VALID_CALLBACKS = {"eval", "checkpoint", "progress", "timing", "early_stopping"}
 

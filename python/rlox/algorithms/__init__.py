@@ -43,6 +43,8 @@ from rlox.algorithms.mpo import MPO
 from rlox.algorithms.dtp import DecisionTreePolicy, RWDTP, RCDTP
 from rlox.algorithms.pqn import PQN
 from rlox.algorithms.crossq import CrossQ
+from rlox.algorithms.tqc import TQC
+from rlox.algorithms.recurrent_ppo import RecurrentPPO
 
 __all__ = [
     "PPO",
@@ -70,4 +72,6 @@ __all__ = [
     "RCDTP",
     "PQN",
     "CrossQ",
+    "TQC",
+    "RecurrentPPO",
 ]

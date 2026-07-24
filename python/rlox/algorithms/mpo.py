@@ -62,6 +62,18 @@ class MPO:
 
         self.seed = seed
 
+        # Seed torch/np/env RNG for reproducibility.  This MUST happen
+        # before the actor/critic networks are constructed below so that
+        # their weight initialisation is deterministic for a given seed
+        # (precedent: pqn.py:118, crossq.py:141).  Gymnasium does not
+        # propagate `env.reset(seed=...)` to the action space's RNG, and
+        # the `learning_starts` exploration phase in `train()` calls
+        # `action_space.sample()`, so the action space needs its own
+        # `.seed()` call here too.
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        self.env.action_space.seed(seed)
+
         cfg_fields = {f.name for f in MPOConfig.__dataclass_fields__.values()}
         cfg_dict = {k: v for k, v in config_kwargs.items() if k in cfg_fields}
         self.config = MPOConfig(**cfg_dict)

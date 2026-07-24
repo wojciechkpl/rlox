@@ -1,6 +1,6 @@
 [package]
 name = "rlox-rl-ops"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 license.workspace = true
 description = "Estimator-agnostic advantage and token-KL ops for rlox — no autograd, no rlox-core dependency"

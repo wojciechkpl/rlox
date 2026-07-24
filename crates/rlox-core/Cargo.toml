@@ -1,6 +1,6 @@
 [package]
 name = "rlox-core"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license.workspace = true
 description = "Rust-accelerated RL core: VecEnv, replay/prioritized/offline buffers, GAE, V-trace, KL, GRPO, async pipeline"
@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 memmap2 = "0.9"
 crossbeam-channel = "0.5"
 parking_lot = "0.12"
-rlox-rl-ops = { path = "../rlox-rl-ops" }
+rlox-rl-ops = { version = "0.3.0", path = "../rlox-rl-ops" }
 
 [features]
 default = []

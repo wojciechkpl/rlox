@@ -1,6 +1,7 @@
 [package]
 name = "rlox-candle"
 version = "0.2.0"
+publish = false  # experimental NN backend — not released to crates.io
 edition = "2021"
 license.workspace = true
 description = "Candle backend for rlox neural network training"
@@ -9,8 +10,8 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-rlox-nn = { version = "0.2.0", path = "../rlox-nn" }
-rlox-core = { version = "0.2.0", path = "../rlox-core" }
+rlox-nn = { version = "0.3.0", path = "../rlox-nn" }
+rlox-core = { version = "0.3.0", path = "../rlox-core" }
 candle-core = "0.8"
 candle-nn = "0.8"
 rand = "0.9"

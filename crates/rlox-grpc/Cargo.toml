@@ -7,7 +7,7 @@ description = "gRPC distributed environment workers for rlox"
 publish = false
 
 [dependencies]
-rlox-core = { version = "0.2.0", path = "../rlox-core" }
+rlox-core = { version = "0.3.0", path = "../rlox-core" }
 tonic = "0.13"
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }

@@ -33,6 +33,32 @@ Interface assumptions the implementer MUST honour:
   - Both counters increment during ``train()``.
   - ``Trainer("crossq", ...)`` routes through the standard registry and emits
     a ``UserWarning`` because status is ``"experimental"``.
+
+Convergence-fix contract (see docs/plans/crossq-convergence-fix-2026-07-18.md
+for the two controlled experiments that diagnosed these):
+
+  - ``CrossQ.__init__`` accepts an ``adam_betas`` kwarg, default
+    ``(0.5, 0.999)`` (NOT torch's ``(0.9, 0.999)`` default). It configures
+    ALL four Adam optimizers: ``actor_optimizer``, ``critic1_optimizer``,
+    ``critic2_optimizer``, and ``alpha_optimizer`` (when ``auto_entropy``).
+    ``CrossQConfig`` must expose the same field name (``adam_betas``) so
+    ``from_checkpoint()`` -- which rebuilds via ``cls(env_id=eid, **config)``
+    -- round-trips it correctly.
+  - ``seed`` must actually control torch/np/env RNG (currently a no-op: it
+    is stored as ``self.seed`` but never applied). Two ``CrossQ`` instances
+    built (and, for a short identical training budget, trained) with the
+    same ``seed`` must be bit-identical; different seeds must diverge. This
+    is required both for reproducibility and for the project's multi-seed
+    IQM validation methodology.
+  - The joint forward pass's ``[:B]``/``[B:]`` split (current vs next half)
+    and the ``.detach()`` on the TD target are already correct and must
+    stay that way -- ``TestCrossQJointPassValueAlignment`` is a FAST,
+    mutation-checked guard for this (previously only the slow convergence
+    test would have caught a regression here).
+  - The ``@pytest.mark.slow`` convergence test asserts on a **greedy
+    (deterministic) evaluation** mean reward, not the training-loop
+    ``mean_reward`` (which is dragged down by the random-exploration
+    ``learning_starts`` phase and stochastic action sampling).
 """
 
 from __future__ import annotations
@@ -912,25 +938,485 @@ class TestCrossQSaveLoad:
 
 
 # ---------------------------------------------------------------------------
+# TestCrossQAdamBetas — Adam beta1 must default to 0.5, not torch's 0.9
+# ---------------------------------------------------------------------------
+
+
+class TestCrossQAdamBetas:
+    """CrossQ's Adam optimizers must use ``betas=(0.5, 0.999)`` by default.
+
+    Root cause (docs/plans/crossq-convergence-fix-2026-07-18.md): a
+    controlled ablation holding everything else fixed showed torch's default
+    ``betas=(0.9, 0.999)`` fails to converge on Pendulum-v1 (greedy eval
+    -716) while ``betas=(0.5, 0.999)`` (paper / SB3-contrib value) solves it
+    (greedy eval -166). BatchNorm-based critics destabilise under high Adam
+    first-moment momentum, so CrossQ needs a lower beta1 than SAC/TD3.
+
+    All four optimizers built by ``CrossQ.__init__`` (actor, critic1,
+    critic2, and alpha when ``auto_entropy=True``) must use these betas.
+    ``adam_betas`` must also be a configurable constructor kwarg (project
+    convention: no hardcoded magic numbers).
+    """
+
+    def test_actor_optimizer_default_betas_is_0_5_0_999(self):
+        """The actor Adam optimizer defaults to betas=(0.5, 0.999)."""
+        from rlox.algorithms.crossq import CrossQ
+
+        crossq = CrossQ(env_id="Pendulum-v1")
+        betas = crossq.actor_optimizer.param_groups[0]["betas"]
+        assert betas == pytest.approx((0.5, 0.999)), (
+            f"Expected default Adam betas=(0.5, 0.999) for actor_optimizer "
+            f"(CrossQ needs beta1=0.5 for BatchNorm stability -- torch's "
+            f"default beta1=0.9 fails to converge), got {betas}."
+        )
+
+    def test_critic1_optimizer_default_betas_is_0_5_0_999(self):
+        """The critic1 Adam optimizer defaults to betas=(0.5, 0.999)."""
+        from rlox.algorithms.crossq import CrossQ
+
+        crossq = CrossQ(env_id="Pendulum-v1")
+        betas = crossq.critic1_optimizer.param_groups[0]["betas"]
+        assert betas == pytest.approx((0.5, 0.999)), (
+            f"Expected default Adam betas=(0.5, 0.999) for critic1_optimizer, "
+            f"got {betas}."
+        )
+
+    def test_critic2_optimizer_default_betas_is_0_5_0_999(self):
+        """The critic2 Adam optimizer defaults to betas=(0.5, 0.999)."""
+        from rlox.algorithms.crossq import CrossQ
+
+        crossq = CrossQ(env_id="Pendulum-v1")
+        betas = crossq.critic2_optimizer.param_groups[0]["betas"]
+        assert betas == pytest.approx((0.5, 0.999)), (
+            f"Expected default Adam betas=(0.5, 0.999) for critic2_optimizer, "
+            f"got {betas}."
+        )
+
+    def test_alpha_optimizer_default_betas_is_0_5_0_999_when_auto_entropy(self):
+        """The alpha (entropy coefficient) optimizer also defaults to betas=(0.5, 0.999)."""
+        from rlox.algorithms.crossq import CrossQ
+
+        crossq = CrossQ(env_id="Pendulum-v1", auto_entropy=True)
+        assert hasattr(crossq, "alpha_optimizer"), (
+            "CrossQ with auto_entropy=True must expose self.alpha_optimizer."
+        )
+        betas = crossq.alpha_optimizer.param_groups[0]["betas"]
+        assert betas == pytest.approx((0.5, 0.999)), (
+            f"Expected default Adam betas=(0.5, 0.999) for alpha_optimizer, "
+            f"got {betas}."
+        )
+
+    def test_config_stores_default_adam_betas(self):
+        """CrossQ.config (a CrossQConfig) records adam_betas=(0.5, 0.999) by default.
+
+        Required for checkpoint round-tripping: from_checkpoint() rebuilds
+        CrossQ via ``cls(env_id=eid, **config)``, so the CrossQConfig field
+        name must match the __init__ kwarg name exactly.
+        """
+        from rlox.algorithms.crossq import CrossQ
+
+        crossq = CrossQ(env_id="Pendulum-v1")
+        assert crossq.config.adam_betas == pytest.approx((0.5, 0.999)), (
+            f"Expected crossq.config.adam_betas == (0.5, 0.999), "
+            f"got {crossq.config.adam_betas!r}."
+        )
+
+    def test_adam_betas_kwarg_configures_actor_and_critic_optimizers(self):
+        """A custom adam_betas kwarg overrides the default for actor/critic1/critic2."""
+        from rlox.algorithms.crossq import CrossQ
+
+        crossq = CrossQ(env_id="Pendulum-v1", adam_betas=(0.7, 0.99))
+        for name, opt in (
+            ("actor_optimizer", crossq.actor_optimizer),
+            ("critic1_optimizer", crossq.critic1_optimizer),
+            ("critic2_optimizer", crossq.critic2_optimizer),
+        ):
+            betas = opt.param_groups[0]["betas"]
+            assert betas == pytest.approx((0.7, 0.99)), (
+                f"Expected {name} betas == (0.7, 0.99) after passing "
+                f"adam_betas=(0.7, 0.99), got {betas}."
+            )
+
+    def test_adam_betas_kwarg_configures_alpha_optimizer(self):
+        """A custom adam_betas kwarg also overrides the alpha optimizer's betas."""
+        from rlox.algorithms.crossq import CrossQ
+
+        crossq = CrossQ(
+            env_id="Pendulum-v1", adam_betas=(0.7, 0.99), auto_entropy=True
+        )
+        betas = crossq.alpha_optimizer.param_groups[0]["betas"]
+        assert betas == pytest.approx((0.7, 0.99)), (
+            f"Expected alpha_optimizer betas == (0.7, 0.99) after passing "
+            f"adam_betas=(0.7, 0.99), got {betas}."
+        )
+
+    def test_custom_adam_betas_round_trips_through_checkpoint(self, tmp_path):
+        """A non-default adam_betas survives a save()/from_checkpoint() round-trip."""
+        from rlox.algorithms.crossq import CrossQ
+
+        crossq = CrossQ(
+            env_id="Pendulum-v1",
+            adam_betas=(0.7, 0.99),
+            learning_starts=50,
+            batch_size=32,
+            seed=0,
+        )
+        crossq.train(total_timesteps=100)
+
+        ckpt = str(tmp_path / "crossq_betas.pt")
+        crossq.save(ckpt)
+        crossq2 = CrossQ.from_checkpoint(ckpt, env_id="Pendulum-v1")
+
+        betas = crossq2.actor_optimizer.param_groups[0]["betas"]
+        assert betas == pytest.approx((0.7, 0.99)), (
+            f"Expected adam_betas=(0.7, 0.99) to survive a checkpoint "
+            f"round-trip, got actor_optimizer betas={betas}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestCrossQSeedReproducibility — `seed` must actually control RNG
+# ---------------------------------------------------------------------------
+
+
+class TestCrossQSeedReproducibility:
+    """The ``seed`` constructor kwarg must control torch/np/env RNG.
+
+    Root cause (docs/plans/crossq-convergence-fix-2026-07-18.md):
+    ``crossq.py`` stores ``self.seed = seed`` but never applies it, so every
+    construction/training run draws from whatever state the process-global
+    RNGs happen to be in. This breaks reproducibility of a single run AND
+    the project's multi-seed IQM validation methodology (different `seed`
+    values must produce controlled, comparable, but *different* runs).
+
+    Interface assumption: fixing this requires applying `seed` to torch
+    (network init and stochastic policy sampling) and -- since Pendulum-v1's
+    reset state and the random-exploration ``action_space.sample()`` calls
+    are also sources of randomness -- to numpy/the env as well. These tests
+    assert only the externally observable consequence (same seed -> same
+    outcome; different seed -> different outcome), not which specific RNG
+    call the implementer seeds.
+    """
+
+    _FIXED_OBS = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+
+    @staticmethod
+    def _assert_state_dicts_equal(sd_a, sd_b, label):
+        assert sd_a.keys() == sd_b.keys(), (
+            f"{label}: state_dict keys differ: {list(sd_a.keys())} vs {list(sd_b.keys())}"
+        )
+        for key in sd_a:
+            assert torch.equal(sd_a[key], sd_b[key]), (
+                f"{label}: tensor '{key}' differs between the two instances."
+            )
+
+    @staticmethod
+    def _assert_state_dicts_differ(sd_a, sd_b, label):
+        assert sd_a.keys() == sd_b.keys(), (
+            f"{label}: state_dict keys differ: {list(sd_a.keys())} vs {list(sd_b.keys())}"
+        )
+        all_equal = all(torch.equal(sd_a[key], sd_b[key]) for key in sd_a)
+        assert not all_equal, (
+            f"{label}: every tensor is identical between the two instances; "
+            f"expected at least one to differ."
+        )
+
+    # -- construction-time determinism (no training) -----------------------
+
+    def test_same_seed_produces_identical_initial_actor_parameters(self):
+        """Two CrossQ(seed=123) instances must have bit-identical actor init."""
+        from rlox.algorithms.crossq import CrossQ
+
+        a = CrossQ(env_id="Pendulum-v1", seed=123)
+        b = CrossQ(env_id="Pendulum-v1", seed=123)
+        self._assert_state_dicts_equal(
+            a.actor.state_dict(), b.actor.state_dict(),
+            "same seed=123, actor init",
+        )
+
+    def test_same_seed_produces_identical_initial_critic_parameters(self):
+        """Two CrossQ(seed=123) instances must have bit-identical critic1/critic2 init."""
+        from rlox.algorithms.crossq import CrossQ
+
+        a = CrossQ(env_id="Pendulum-v1", seed=123)
+        b = CrossQ(env_id="Pendulum-v1", seed=123)
+        self._assert_state_dicts_equal(
+            a.critic1.state_dict(), b.critic1.state_dict(),
+            "same seed=123, critic1 init",
+        )
+        self._assert_state_dicts_equal(
+            a.critic2.state_dict(), b.critic2.state_dict(),
+            "same seed=123, critic2 init",
+        )
+
+    def test_different_seeds_produce_different_initial_actor_parameters(self):
+        """CrossQ(seed=123) and CrossQ(seed=456) must NOT have identical actor init.
+
+        Guards against a degenerate 'fix' that calls torch.manual_seed with a
+        hardcoded constant instead of the `seed` argument, which would make
+        the identical-init test above pass without `seed` actually doing
+        anything useful.
+        """
+        from rlox.algorithms.crossq import CrossQ
+
+        a = CrossQ(env_id="Pendulum-v1", seed=123)
+        b = CrossQ(env_id="Pendulum-v1", seed=456)
+        self._assert_state_dicts_differ(
+            a.actor.state_dict(), b.actor.state_dict(),
+            "seed=123 vs seed=456, actor init",
+        )
+
+    # -- short-training determinism -----------------------------------------
+
+    @pytest.fixture(scope="class")
+    def same_seed_pair(self):
+        """Two CrossQ(seed=123) instances trained for an identical short budget."""
+        from rlox.algorithms.crossq import CrossQ
+
+        kwargs = dict(
+            env_id="Pendulum-v1",
+            hidden=32,
+            batch_size=32,
+            learning_starts=50,
+            policy_delay=3,
+            seed=123,
+        )
+        a = CrossQ(**kwargs)
+        a.train(total_timesteps=800)
+        b = CrossQ(**kwargs)
+        b.train(total_timesteps=800)
+        return a, b
+
+    @pytest.fixture(scope="class")
+    def different_seed_pair(self):
+        """Two CrossQ instances (seed=123 vs seed=456), same short training budget."""
+        from rlox.algorithms.crossq import CrossQ
+
+        a = CrossQ(
+            env_id="Pendulum-v1", hidden=32, batch_size=32,
+            learning_starts=50, policy_delay=3, seed=123,
+        )
+        a.train(total_timesteps=800)
+        b = CrossQ(
+            env_id="Pendulum-v1", hidden=32, batch_size=32,
+            learning_starts=50, policy_delay=3, seed=456,
+        )
+        b.train(total_timesteps=800)
+        return a, b
+
+    def test_same_seed_short_training_produces_identical_predict_output(
+        self, same_seed_pair
+    ):
+        """Same seed -> identical deterministic predict() after ~800 training steps."""
+        a, b = same_seed_pair
+        action_a = a.predict(self._FIXED_OBS, deterministic=True)
+        action_b = b.predict(self._FIXED_OBS, deterministic=True)
+        np.testing.assert_array_equal(
+            action_a, action_b,
+            err_msg=(
+                "Two CrossQ(seed=123) instances trained for an identical "
+                "800-step budget must produce identical predict() output on "
+                "the same observation. `seed` must control torch/np/env RNG."
+            ),
+        )
+
+    def test_same_seed_short_training_produces_identical_critic_weights(
+        self, same_seed_pair
+    ):
+        """Same seed -> identical critic1 weights after ~800 training steps."""
+        a, b = same_seed_pair
+        self._assert_state_dicts_equal(
+            a.critic1.state_dict(), b.critic1.state_dict(),
+            "same seed=123, critic1 after 800 training steps",
+        )
+
+    def test_different_seeds_short_training_produce_different_predict_output(
+        self, different_seed_pair
+    ):
+        """Different seeds -> different predict() output after ~800 training steps.
+
+        Guards against a degenerate 'fix' where seeding is applied but the
+        actual `seed` value is ignored (e.g. hardcoded to a constant).
+        """
+        a, b = different_seed_pair
+        action_a = a.predict(self._FIXED_OBS, deterministic=True)
+        action_b = b.predict(self._FIXED_OBS, deterministic=True)
+        assert not np.array_equal(action_a, action_b), (
+            "CrossQ(seed=123) and CrossQ(seed=456) trained for an identical "
+            "800-step budget produced IDENTICAL predict() output -- "
+            "different seed values must produce different (controlled) runs."
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestCrossQJointPassValueAlignment — fast guard for the joint forward pass
+# ---------------------------------------------------------------------------
+
+
+class TestCrossQJointPassValueAlignment:
+    """Fast, mutation-checked guard for the joint critic forward pass.
+
+    The joint pass concatenates (obs, next_obs) and (actions, next_act) into
+    ONE batch, forwards it through the live critic ONCE (so BatchRenorm sees
+    consistent statistics), then splits the result back into a "current"
+    half (``[:B]``, used in the critic loss) and a "next"/bootstrap half
+    (``[B:]``, used -- detached -- in the TD target). This guards that split
+    against a future split/detach regression with a FAST test (previously
+    only the ``@pytest.mark.slow`` convergence test would have caught it).
+
+    Technique: replace critic1/critic2 with a deterministic stub whose
+    output is a known function of its input (``sum(obs) + sum(act)``), push
+    transitions whose obs/next_obs sums are numerically far apart (~3 vs
+    ~60), and inspect what ``F.mse_loss`` is actually called with. If the
+    ``[:B]``/``[B:]`` split were reversed, or the TD target were not
+    detached, this test would fail (verified by mutation -- see the RED
+    phase report).
+    """
+
+    class _SumCritic(nn.Module):
+        """Deterministic stub: Q(obs, act) = sum(obs) + sum(act) + bias(=0).
+
+        ``bias`` is a learnable (zero-initialised) parameter purely so the
+        computation graph has a leaf with ``requires_grad=True`` -- without
+        it, ``critic_loss.backward()`` inside the real ``_update()`` would
+        raise (nothing in the graph would require grad, since obs/act
+        tensors sampled from the replay buffer carry no grad of their own).
+        Because ``bias`` starts at exactly 0, the numeric VALUE this stub
+        produces is unaffected -- it is still exactly ``sum(obs) + sum(act)``.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self.bias = nn.Parameter(torch.zeros(1))
+
+        def forward(self, obs, act):
+            return (
+                obs.sum(dim=-1, keepdim=True)
+                + act.sum(dim=-1, keepdim=True)
+                + self.bias
+            )
+
+    def test_joint_pass_current_next_split_matches_concat_order_and_target_is_detached(
+        self, monkeypatch
+    ):
+        """The [:B]/[B:] split matches concat order; the TD target is detached."""
+        import rlox.algorithms.crossq as crossq_module
+        from rlox.algorithms.crossq import CrossQ
+
+        # policy_delay=1000 guarantees the (irrelevant, for this test) actor
+        # update branch cannot fire on the single _update() call below.
+        crossq = CrossQ(
+            env_id="Pendulum-v1",
+            hidden=8,
+            batch_size=16,
+            policy_delay=1000,
+            seed=0,
+        )
+        crossq.critic1 = self._SumCritic()
+        crossq.critic2 = self._SumCritic()
+
+        # "Current" cluster (obs) sums to ~3; "next" cluster (next_obs) sums
+        # to ~60 -- far enough apart that a reversed split is unmistakable,
+        # but small enough to stay in-distribution for the (untouched, real)
+        # actor network, which also consumes next_obs internally.
+        n_transitions = 16
+        for i in range(n_transitions):
+            obs_i = np.array([1.0, 1.0, 1.0], dtype=np.float32) + i * 1e-3
+            next_obs_i = np.array([20.0, 20.0, 20.0], dtype=np.float32) + i * 1e-3
+            action_i = np.array([0.0], dtype=np.float32)
+            crossq.buffer.push(obs_i, action_i, 1.0, False, False, next_obs_i)
+
+        recorded_calls = []
+        real_mse_loss = crossq_module.F.mse_loss
+
+        def _recording_mse_loss(input, target, *args, **kwargs):
+            recorded_calls.append(
+                (input.detach().clone(), target, bool(target.requires_grad))
+            )
+            return real_mse_loss(input, target, *args, **kwargs)
+
+        monkeypatch.setattr(crossq_module.F, "mse_loss", _recording_mse_loss)
+
+        crossq._update(step=0)
+
+        assert len(recorded_calls) == 2, (
+            f"Expected exactly 2 F.mse_loss calls (critic1_loss, critic2_loss) "
+            f"from one _update() call with the actor branch inactive; got "
+            f"{len(recorded_calls)}."
+        )
+
+        for i, (q_current, target, target_requires_grad) in enumerate(recorded_calls):
+            current_mean = q_current.mean().item()
+            target_mean = target.mean().item()
+
+            # (a) split alignment: the value passed as the *prediction* to
+            # F.mse_loss must come from the CURRENT half ([:B], obs+actions,
+            # sum ~3), not the NEXT half ([B:], next_obs+next_act, sum ~60).
+            assert current_mean < 15.0, (
+                f"F.mse_loss call #{i}: prediction Q-value mean="
+                f"{current_mean:.3f} looks like the NEXT half (obs~20 "
+                f"cluster), not the CURRENT half (obs~1 cluster). The "
+                f"[:B]/[B:] split in _update() may be reversed."
+            )
+            # And the TD target must be built from the NEXT half (~60,
+            # scaled by gamma and offset by reward/entropy terms).
+            assert target_mean > 15.0, (
+                f"F.mse_loss call #{i}: target mean={target_mean:.3f} looks "
+                f"like it was built from the CURRENT half, not the NEXT "
+                f"half. The [:B]/[B:] split in _update() may be reversed."
+            )
+
+            # (b) the TD target must be detached -- no gradient path back
+            # into the critic through the bootstrap ([B:]) computation.
+            assert target_requires_grad is False, (
+                f"F.mse_loss call #{i}: target.requires_grad is True. The "
+                f"TD target must be `.detach()`-ed before use in the critic "
+                f"loss, or gradients leak through the next-half computation "
+                f"back into critic1/critic2's parameters."
+            )
+
+
+# ---------------------------------------------------------------------------
 # TestCrossQConvergence — marked slow, not run in the fast suite
 # ---------------------------------------------------------------------------
 
 
 class TestCrossQConvergence:
-    """CrossQ learns Pendulum-v1 well above random level.
+    """CrossQ solves Pendulum-v1 under greedy (deterministic) evaluation.
 
-    Pendulum-v1 random baseline: mean reward ≈ −1200.
-    Threshold of −400 is a low bar that confirms the agent is doing something.
-    These tests are expensive; mark with @pytest.mark.slow.
+    Pendulum-v1 random baseline: mean reward ≈ −1200. A working CrossQ
+    (correct joint forward pass, correct BatchRenorm, β1=0.5 Adam betas)
+    reaches roughly −166 to −174 (docs/plans/crossq-convergence-fix-2026-07-18.md).
+    The threshold here (−250) sits comfortably below those measured values
+    but well above the random baseline, giving margin for run-to-run
+    variation while still only being clearable by a genuinely converged
+    policy. The *old* version of this test used a −400 bar on the
+    training-loop ``mean_reward`` (not a greedy eval) and was both flaky
+    (the seed bug meant every run was an uncontrolled fresh draw) and too
+    coarse (it only proved the agent was "doing something," not that it had
+    converged).
+
+    This test asserts on a **greedy eval** (``predict(deterministic=True)``
+    averaged over several episodes with a fresh env), NOT the training-loop
+    ``mean_reward`` returned by ``train()`` -- that figure is dragged down by
+    the random-exploration ``learning_starts`` phase and by stochastic
+    (non-deterministic) action sampling throughout training, so it
+    systematically underestimates the learned policy's actual quality.
+
+    Relies on ``seed`` actually controlling torch/np/env RNG (see
+    ``TestCrossQSeedReproducibility``) to be deterministic run-to-run.
+    Expensive; marked with @pytest.mark.slow.
     """
 
     @pytest.mark.slow
-    def test_crossq_learns_pendulum_above_random(self):
-        """After 20k steps CrossQ achieves mean_reward > −400 on Pendulum-v1.
+    def test_crossq_greedy_eval_solves_pendulum(self):
+        """After 20k training steps, a 10-episode greedy eval reaches > −250.
 
-        Random policy on Pendulum-v1: ≈ −1200.  A threshold of −400 is a
-        conservative bar that proves CrossQ's joint forward pass + BatchRenorm
-        is actually learning.
+        Random policy on Pendulum-v1: ≈ −1200. A trained-but-broken CrossQ
+        (default Adam betas) plateaus around −700 to −800. A correctly
+        configured CrossQ (β1=0.5) reaches ≈ −166 to −174. −250 is a
+        conservative bar in between that only a genuinely converged policy
+        clears.
         """
         from rlox.algorithms.crossq import CrossQ
 
@@ -951,11 +1437,32 @@ class TestCrossQConvergence:
             renorm_warmup_steps=100_000,
             seed=42,
         )
-        metrics = crossq.train(total_timesteps=20_000)
-        mean_reward = metrics.get("mean_reward", -9999.0)
-        assert mean_reward > -400, (
-            f"Expected mean_reward > -400 after 20k steps on Pendulum-v1, "
-            f"got {mean_reward:.1f}. "
-            "CrossQ may not be learning — check the joint forward pass and "
-            "BatchRenorm correctness."
+        crossq.train(total_timesteps=20_000)
+
+        # Greedy evaluation on a fresh env -- deterministic actions, no
+        # exploration noise. Per-episode seeds follow the project's
+        # eval-seeding convention (`seed=base+ep`, not a fixed `seed=base`
+        # every episode -- see PROJECT_QUICK_REFERENCE.md "Non-obvious
+        # facts") so the 10 episodes probe genuinely different initial
+        # states rather than repeating one.
+        n_eval_episodes = 10
+        eval_env = gym.make("Pendulum-v1")
+        episode_rewards = []
+        for ep in range(n_eval_episodes):
+            obs, _ = eval_env.reset(seed=42 + ep)
+            terminated = truncated = False
+            ep_reward = 0.0
+            while not (terminated or truncated):
+                action = crossq.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, _ = eval_env.step(action)
+                ep_reward += float(reward)
+            episode_rewards.append(ep_reward)
+
+        mean_eval_reward = float(np.mean(episode_rewards))
+        assert mean_eval_reward > -250, (
+            f"Expected greedy-eval mean_reward > -250 after 20k steps on "
+            f"Pendulum-v1 (seed=42), got {mean_eval_reward:.1f} over "
+            f"{n_eval_episodes} episodes: {episode_rewards}. "
+            "CrossQ's Adam betas and/or seed handling may still be broken "
+            "-- see docs/plans/crossq-convergence-fix-2026-07-18.md."
         )

@@ -59,8 +59,14 @@ if [ "$#" -gt 0 ]; then
   TASKS_MAX="${WK_TASKS_MAX:-4096}"
   MEM_MAX="${WK_MEM_MAX:-24G}"
   if echo "$REMOTE_CMD" | grep -q 'cargo test'; then
+    # RLOX_SANDBOX_ADVERSARIAL_TESTS=1 opts the real-bomb tests (fork/memory/pids
+    # in adversarial_containment.rs) into running. They require the cgroup
+    # self-migration this rlox.slice scope provides AND the TasksMax/MemoryMax
+    # backstop set just above; both exist only here, so the var is set only in
+    # this branch. Elsewhere (CI shared runners, plain SSH) it's unset and those
+    # tests skip instead of failing.
     # shellcheck disable=SC2029
-    ssh "$REMOTE_HOST" "systemd-run --user --scope --slice=rlox.slice -p TasksMax=$TASKS_MAX -p MemoryMax=$MEM_MAX --expand-environment=no -- bash -c 'cd \"$REMOTE_DIR\" && . \$HOME/.cargo/env && $REMOTE_CMD'"
+    ssh "$REMOTE_HOST" "systemd-run --user --scope --slice=rlox.slice -p TasksMax=$TASKS_MAX -p MemoryMax=$MEM_MAX --expand-environment=no -- bash -c 'cd \"$REMOTE_DIR\" && . \$HOME/.cargo/env && export RLOX_SANDBOX_ADVERSARIAL_TESTS=1 && $REMOTE_CMD'"
   else
     # shellcheck disable=SC2029
     ssh "$REMOTE_HOST" "cd '$REMOTE_DIR' && { [ -f \$HOME/.cargo/env ] && . \$HOME/.cargo/env; }; { [ -f \$HOME/.local/bin/env ] && . \$HOME/.local/bin/env; }; $REMOTE_CMD"

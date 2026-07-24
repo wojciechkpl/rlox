@@ -38,26 +38,40 @@ The result: **3-50x faster** than SB3/TorchRL on data-plane operations, with the
 
 ### Prerequisites
 
-- **Rust 1.75+** -- install via [rustup](https://rustup.rs/):
+- **[uv](https://docs.astral.sh/uv/)** -- fast Python package & environment manager:
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+- **Python 3.10-3.13** -- uv can install one for you: `uv python install 3.12`
+- **Rust 1.75+** (only needed to build from source) -- install via [rustup](https://rustup.rs/):
   ```bash
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   ```
-- **Python 3.10-3.13**
-- **Optional**: `pip install gymnasium[mujoco]` for MuJoCo environments
-- **Optional**: `pip install pettingzoo` for multi-agent environments
+- **Optional**: `uv pip install "gymnasium[mujoco]"` for MuJoCo environments
+- **Optional**: `uv pip install pettingzoo` for multi-agent environments
 
 ### Installation
 
 ```bash
-pip install rlox
+uv venv                # create a virtual environment (.venv)
+uv pip install rlox
 ```
+
+Or add rlox to a uv-managed project:
+
+```bash
+uv add rlox
+```
+
+Then activate the environment (`source .venv/bin/activate`) or prefix commands
+with `uv run` (e.g. `uv run python -m rlox train --config config.yaml`).
 
 Or build from source:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install maturin numpy gymnasium torch
-maturin develop --release
+uv venv
+uv pip install maturin numpy gymnasium torch
+uv run maturin develop --release
 ```
 
 **Train PPO on CartPole in 3 lines:**
@@ -256,12 +270,12 @@ SAC HalfCheetah: rlox 10872 vs SB3 10796 — statistically identical, both beat 
 # Rust tests across all crates (rlox-core, rlox-sandbox, rlox-rl-ops, etc.)
 cargo test --workspace
 
-# Python tests (after maturin develop)
-pip install -e ".[all]"
-pytest tests/python/ -q
+# Python tests (build the extension into the venv, then run pytest)
+uv run maturin develop --release
+uv run pytest tests/python/ -q
 
 # Quick smoke test (skip slow tests)
-pytest tests/python/ -m "not slow" -q
+uv run pytest tests/python/ -m "not slow" -q
 
 # Single crate
 cargo test --package rlox-core

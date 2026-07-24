@@ -25,7 +25,7 @@ sns.set_theme(style="whitegrid", font_scale=1.1)
 DEFAULT_N_BOOTSTRAP: int = 2_000
 DEFAULT_BOOTSTRAP_SEED: int = 42
 
-FRAMEWORK_COLORS = {"rlox": "#E63946", "sb3": "#457B9D"}
+FRAMEWORK_COLORS = {"rlox": "#1565c0", "sb3": "#e65100"}  # match paper (blue/orange)
 FRAMEWORK_LABELS = {"rlox": "rlox (Rust)", "sb3": "Stable-Baselines3"}
 
 

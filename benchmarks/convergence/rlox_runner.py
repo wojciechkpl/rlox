@@ -598,6 +598,7 @@ def _run_dqn(
     if "target_update_interval" in hp:
         filtered["target_update_freq"] = hp["target_update_interval"]
 
+    filtered.pop("hidden", None)  # explicit hidden= below; avoid duplicate kwarg
     dqn = DQN(env_id=env_id, hidden=hidden, seed=seed, **filtered)
     start_time = time.monotonic()
 
