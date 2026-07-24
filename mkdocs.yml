@@ -119,10 +119,14 @@ nav:
       - A2C: algorithms/a2c.md
       - PPO: algorithms/ppo.md
       - TRPO: algorithms/trpo.md
+      - Recurrent PPO: algorithms/recurrent_ppo.md
     - Off-Policy:
       - DQN: algorithms/dqn.md
+      - PQN: algorithms/pqn.md
       - TD3: algorithms/td3.md
       - SAC: algorithms/sac.md
+      - CrossQ: algorithms/crossq.md
+      - TQC: algorithms/tqc.md
       - MPO: algorithms/mpo.md
     - Multi-Agent:
       - MAPPO: algorithms/mappo.md
