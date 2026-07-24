@@ -1,6 +1,7 @@
 [package]
 name = "rlox-burn"
 version = "0.2.0"
+publish = false  # experimental NN backend — not released to crates.io
 edition = "2021"
 license.workspace = true
 description = "Burn backend for rlox neural network training"
@@ -9,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-rlox-nn = { version = "0.2.0", path = "../rlox-nn" }
+rlox-nn = { version = "0.3.0", path = "../rlox-nn" }
 burn = { version = "0.16", features = ["autodiff", "ndarray", "wgpu"] }
 rand = "0.9"
 rand_chacha = "0.9"

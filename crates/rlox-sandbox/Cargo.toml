@@ -1,6 +1,7 @@
 [package]
 name = "rlox-sandbox"
 version = "0.1.0"
+publish = false  # Linux-only sandbox worker/app — not released to crates.io
 edition = "2021"
 license.workspace = true
 description = "Hard-isolation sandbox worker: Linux namespaces + seccomp-bpf + cgroup v2"
