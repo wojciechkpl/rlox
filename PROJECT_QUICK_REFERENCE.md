@@ -26,7 +26,7 @@ DQN, A2C, TRPO).
 | purpose | command |
 |---|---|
 | Install (editable, rebuild Rust) | `maturin develop --release` |
-| Run unit tests | `./.venv/bin/python -m pytest tests/python/ -q` |
+| Run unit tests | `./.venv/bin/python -m pytest tests/ -q` (use `tests/`, not `tests/python/` — the latter collects 1583 of 2233 and skips `tests/agentic/`) |
 | Run slow / integration tests | `./.venv/bin/python -m pytest -m slow` |
 | **Verify everything CI checks** | `bash scripts/check-ci-local.sh` (`rust` / `python` to scope, `WK=1` to add the Linux sandbox suite) |
 | Run Rust tests | `cargo test --workspace --no-fail-fast` |

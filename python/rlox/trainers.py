@@ -38,7 +38,9 @@ def _make_legacy_trainer(algo_name: str, class_name: str) -> type:
     ) -> None:
         warnings.warn(
             f"{class_name} is deprecated. Use Trainer('{algo_name}', ...) instead. "
-            f"See https://riserally.github.io/rlox/python-guide/#unified-trainer",
+            # Canonical docs host; see site_url in mkdocs.yml. The old
+            # riserally.github.io URL predates the repo transfer.
+            "See https://wojciechkpl.github.io/rlox/python-guide/#unified-trainer",
             DeprecationWarning,
             stacklevel=2,
         )

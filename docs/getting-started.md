@@ -352,11 +352,12 @@ trainer.train(total_timesteps=100_000)
 # Rust unit tests
 cargo test --package rlox-core
 
-# Python integration tests
-.venv/bin/python -m pytest tests/python/ -v
+# Python integration tests (`tests/`, not `tests/python/` — the latter skips
+# tests/agentic/ and the repo-hygiene guards)
+.venv/bin/python -m pytest tests/ -q
 
-# Both (recommended)
-./scripts/test.sh
+# Every gate CI runs (recommended before pushing)
+bash scripts/check-ci-local.sh
 ```
 
 ## API Reference Summary
