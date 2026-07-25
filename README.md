@@ -276,12 +276,13 @@ bash scripts/check-ci-local.sh
 # On macOS add `--exclude rlox-sandbox` — that crate is Linux-only.
 cargo test --workspace --no-fail-fast
 
-# Python tests (build the extension into the venv, then run pytest)
+# Python tests (build the extension into the venv, then run pytest).
+# Run `tests/` — `tests/python/` alone skips tests/agentic/ and the hygiene guards.
 uv run maturin develop --release
-uv run pytest tests/python/ -q
+uv run pytest tests/ -q
 
 # Quick smoke test (skip slow tests)
-uv run pytest tests/python/ -m "not slow" -q
+uv run pytest tests/ -m "not slow" -q
 
 # Single crate
 cargo test --package rlox-core

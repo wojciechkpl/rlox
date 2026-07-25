@@ -1194,11 +1194,12 @@ See `benchmarks/convergence/rlox_runner.py` for a complete example of this patte
 # Rust tests
 cargo test --package rlox-core
 
-# Python tests
-.venv/bin/python -m pytest tests/python/ -v
+# Python tests (`tests/`, not `tests/python/` — the latter skips tests/agentic/
+# and the repo-hygiene guards)
+.venv/bin/python -m pytest tests/ -q
 
-# Both
-./scripts/test.sh
+# Every gate CI runs (recommended before pushing)
+bash scripts/check-ci-local.sh
 ```
 
 ---

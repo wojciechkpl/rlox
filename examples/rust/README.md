@@ -47,10 +47,13 @@ cargo run --bin grpo_advantages
 The sandbox needs to run inside a `systemd` scope with `Delegate=yes` so that
 the child process can self-migrate into its leaf cgroup.
 
-Via the repo helper (handles delegation automatically):
+Via the repo helper. `WK_DELEGATE=1` is required: the helper only auto-wraps
+`cargo test` in the delegated scope, so without it this runs in a plain SSH
+session and fails with
+`SetupError("child could not write to cgroup.procs (cgroup migration failed)")`.
 
 ```bash
-bash scripts/wk-sync-test.sh \
+WK_DELEGATE=1 bash scripts/wk-sync-test.sh \
   'cargo run --manifest-path examples/rust/Cargo.toml --bin sandbox_verify'
 ```
 

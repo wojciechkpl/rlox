@@ -30,12 +30,16 @@ python -c "import rlox; print('rlox ready')"
 # test *binary* and later binaries' failures stay hidden.
 cargo test --workspace --no-fail-fast
 
-# Python tests (900+ tests, after maturin develop)
-pip install -e ".[all]"
-pytest tests/python/ -q
+# Python tests — run `tests/`, not `tests/python/`, which is what CI runs.
+# `tests/python/` alone collects 1583 of 2233 tests, skipping tests/agentic/ and
+# the repo-hygiene guards. That narrower path is why a conftest collision between
+# tests/agentic/ and tests/python/ went unnoticed locally while it was aborting
+# collection for the entire suite in CI.
+pip install -e ".[all]"          # after maturin develop
+pytest tests/ -q
 
 # Quick smoke test (skip slow integration tests)
-pytest tests/python/ -m "not slow" -q
+pytest tests/ -m "not slow" -q
 
 # Specific test file
 pytest tests/python/test_offline_rl.py -v

@@ -8,10 +8,13 @@
 #
 # Usage:
 #   bash scripts/wk-sync-test.sh                       # sync only
-#   bash scripts/wk-sync-test.sh 'cargo test -p rlox-sandbox'
+#   bash scripts/wk-sync-test.sh 'cargo test -p rlox-sandbox --no-fail-fast'
 #   bash scripts/wk-sync-test.sh 'cargo build -p rlox-core'
+#   WK_DELEGATE=1 bash scripts/wk-sync-test.sh 'cargo run --bin sandbox_verify'
 #
-# Env overrides: WK_HOST (default wk-system), WK_DIR (default /home/wk/rlox).
+# Env overrides: WK_HOST (default wk-system), WK_DIR (default /home/wk/rlox),
+# WK_DELEGATE=1 (force the delegated cgroup scope for a non-`cargo test` command),
+# WK_TASKS_MAX / WK_MEM_MAX (scope backstops, default 4096 / 24G).
 set -euo pipefail
 
 REMOTE_HOST="${WK_HOST:-wk-system}"
@@ -58,7 +61,11 @@ if [ "$#" -gt 0 ]; then
   REMOTE_CMD="$*"
   TASKS_MAX="${WK_TASKS_MAX:-4096}"
   MEM_MAX="${WK_MEM_MAX:-24G}"
-  if echo "$REMOTE_CMD" | grep -q 'cargo test'; then
+  # `cargo test` is auto-detected, but anything that calls run_sandboxed needs the
+  # delegated scope too — e.g. `cargo run --bin sandbox_verify`, which otherwise
+  # dies with SetupError("child could not write to cgroup.procs"). Set
+  # WK_DELEGATE=1 to force the wrapper for such commands.
+  if echo "$REMOTE_CMD" | grep -q 'cargo test' || [ "${WK_DELEGATE:-0}" = 1 ]; then
     # Two capability gates (see crates/rlox-sandbox/tests/common/mod.rs), both
     # satisfied only inside this rlox.slice scope, so both are exported only here.
     # Elsewhere (CI shared runners, plain SSH) they are unset and the affected

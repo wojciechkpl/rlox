@@ -116,10 +116,14 @@ if [ "$SCOPE" = all ] || [ "$SCOPE" = python ]; then
   # tests/test_repo_hygiene.py additionally catches this statically on any version.
   if command -v uv >/dev/null 2>&1; then
     PY310_VENV="${TMPDIR:-/tmp}/rlox-check-venv310"
-    # --allow-existing so the venv is cached across runs (provisioning is ~1 s
-    # cold, near-free warm). Provisioning errors are reported, not swallowed: a
-    # gate that quietly disappears is the failure mode this script exists to stop.
-    if provision=$(uv venv --python 3.10 --allow-existing "$PY310_VENV" 2>&1 &&
+    # --clear: build the venv fresh every run. Reusing it via --allow-existing
+    # rewrites the venv while leaving stale site-packages metadata behind, which
+    # made `uv pip install` fail on a half-installed package. uv's package cache
+    # makes a clean rebuild ~1 s cold and effectively free warm, so there is
+    # nothing to gain from reuse and a whole class of stale-state bugs to avoid.
+    # Provisioning errors are reported, not swallowed: a gate that quietly
+    # disappears is the failure mode this script exists to prevent.
+    if provision=$(uv venv --python 3.10 --clear "$PY310_VENV" 2>&1 &&
          VIRTUAL_ENV="$PY310_VENV" uv pip install -q \
            pytest pytest-timeout pyyaml tomli tomli-w numpy 2>&1); then
       run_gate "pytest tests/agentic on Python 3.10 (oldest supported)" \
