@@ -28,7 +28,7 @@ DQN, A2C, TRPO).
 | Install (editable, rebuild Rust) | `maturin develop --release` |
 | Run unit tests | `./.venv/bin/python -m pytest tests/ -q` (use `tests/`, not `tests/python/` — the latter collects 1583 of 2233 and skips `tests/agentic/`) |
 | Run slow / integration tests | `./.venv/bin/python -m pytest -m slow` |
-| **Verify everything CI checks** | `bash scripts/check-ci-local.sh` (`rust` / `python` to scope, `WK=1` to add the Linux sandbox suite) |
+| **Verify everything CI checks** | `bash scripts/check-ci-local.sh` (`rust` / `python` to scope; `SLOW=1` adds the convergence tests, `WK=1` the Linux sandbox suite) |
 | Run Rust tests | `cargo test --workspace --no-fail-fast` |
 | Python lint | `ruff check python/ tests/` |
 | Rust lint (host) | `cargo clippy --workspace --exclude rlox-sandbox --all-targets -- -D warnings` |
@@ -52,6 +52,9 @@ Two traps worth knowing before trusting a local green run:
   unless you lint against a Linux target (see the table above).
 - `cargo test` stops at the first failing test *binary*, so one failure hides
   every later binary's. Always `--no-fail-fast`.
+- The convergence (`slow`) tests run in CI on pushes to `main` **only** — a PR
+  can be fully green and still break `main`. Run `SLOW=1
+  bash scripts/check-ci-local.sh` before merging training-path changes.
 
 `scripts/check-ci-local.sh` handles both, plus toolchain pinning
 (`rust-toolchain.toml`) so local clippy matches CI's lint set exactly.

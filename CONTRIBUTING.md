@@ -82,8 +82,15 @@ Run every CI gate locally in one command:
 ```bash
 bash scripts/check-ci-local.sh          # all gates
 bash scripts/check-ci-local.sh rust     # or just one half
+SLOW=1 bash scripts/check-ci-local.sh   # + the convergence tests (~20-40 min)
 WK=1 bash scripts/check-ci-local.sh     # + the Linux sandbox suite on wk-system
 ```
+
+**Use `SLOW=1` before merging anything that touches an algorithm's training path
+or a convergence threshold.** CI runs the convergence tests on pushes to `main`
+*only*, so a regression there cannot be caught by a PR — it turns `main` red after
+merge. That is exactly how TQC's convergence test broke `main`: the job had never
+run on the PR that introduced it.
 
 Install the pre-push hook once and the fast gates run automatically:
 

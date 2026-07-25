@@ -18,9 +18,13 @@
 #   bash scripts/check-ci-local.sh rust       # rust gates only
 #   bash scripts/check-ci-local.sh python     # python gates only
 #
-# Runs the FULL Linux sandbox test suite only on wk-system (see
-# scripts/wk-sync-test.sh); those tests need cgroup v2 delegation this host
-# lacks. Pass WK=1 to include them.
+# Two opt-in gates are off by default because they are slow:
+#   SLOW=1  the convergence tests. CI runs these on pushes to main ONLY, so a
+#           regression here cannot be caught by a PR — it turns main red after
+#           merge. Use before merging anything touching a training path or a
+#           convergence threshold. (~20-40 min)
+#   WK=1    the full Linux sandbox suite, on wk-system (see wk-sync-test.sh);
+#           those tests need cgroup v2 delegation this host lacks.
 set -uo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -135,6 +139,18 @@ if [ "$SCOPE" = all ] || [ "$SCOPE" = python ]; then
   else
     printf '\n\033[1;33m==> SKIPPED 3.10 gate: uv not found; install uv, or rely on CI'"'"'s 3.10-3.13 matrix.\033[0m\n'
   fi
+fi
+
+# --- Slow convergence tests (opt-in) ---------------------------------------
+# CI runs these only on pushes to main, so a slow-test regression cannot be caught
+# by a PR — it lands on main and turns it red after merge. That is exactly how
+# TQC's convergence test broke main: it had never run on a PR. ~20-40 min, hence
+# opt-in rather than default. Run before merging anything that touches an
+# algorithm's training path or a convergence threshold.
+if [ "${SLOW:-0}" = 1 ] && { [ "$SCOPE" = all ] || [ "$SCOPE" = python ]; }; then
+  PY="$(python_bin)"
+  run_gate "pytest slow convergence tests (CI runs these on main only)" \
+    "$PY" -m pytest tests/ -q --tb=short -m "slow" --timeout=600 --timeout-method=thread
 fi
 
 # --- Linux sandbox suite (opt-in) ------------------------------------------
