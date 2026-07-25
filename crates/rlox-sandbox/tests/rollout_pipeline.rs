@@ -281,6 +281,9 @@ mod rollout_pipeline_tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_happy_path_passing_code_reward_one() {
+        if crate::common::skip_without_cgroups("test_happy_path_passing_code_reward_one") {
+            return;
+        }
         // Python code that satisfies the test_suite below.
         let passing_code = r#"
 def add(a, b):
@@ -522,6 +525,9 @@ def add(a, b):
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_group_advantage_correctness() {
+        if crate::common::skip_without_cgroups("test_group_advantage_correctness") {
+            return;
+        }
         let group_size = 4_u32;
 
         // Completion 0 and 2: passing code (reward = 1.0).
@@ -718,6 +724,11 @@ def add(a, b):
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_adversarial_infinite_loop_contained_and_telemetry() {
+        if crate::common::skip_without_cgroups(
+            "test_adversarial_infinite_loop_contained_and_telemetry",
+        ) {
+            return;
+        }
         // Adversarial: pure infinite loop — no useful code, no test suite needed.
         let inf_loop_code = "while True: pass".to_string();
 
@@ -842,6 +853,9 @@ def add(a, b):
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_adversarial_telemetry_group_size_gt_1() {
+        if crate::common::skip_without_cgroups("test_adversarial_telemetry_group_size_gt_1") {
+            return;
+        }
         let group_size: u32 = 3;
         let inf_loop_code = "while True: pass".to_string();
 
@@ -975,6 +989,9 @@ def add(a, b):
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_no_zero_time_to_contain_secs_for_oom() {
+        if crate::common::skip_without_cgroups("test_no_zero_time_to_contain_secs_for_oom") {
+            return;
+        }
         // Memory bomb: allocates ~200 MiB in 1 MiB chunks until OOM.
         let memory_bomb = r#"
 data = []
@@ -1143,3 +1160,9 @@ while True:
         );
     }
 }
+
+// Shared capability gates (RLOX_SANDBOX_CGROUP_TESTS /
+// RLOX_SANDBOX_ADVERSARIAL_TESTS). Declared at the end of the file so it
+// cannot absorb the module doc comment above.
+#[cfg(target_os = "linux")]
+mod common;
