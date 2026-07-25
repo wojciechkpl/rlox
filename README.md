@@ -229,7 +229,11 @@ SAC HalfCheetah: rlox 10872 vs SB3 10796 — statistically identical, both beat 
 
 ## Features
 
-- **22 Algorithms**: PPO, SAC, DQN, TD3, A2C, VPG, TRPO, MAPPO, DreamerV3, IMPALA, and more (+ GRPO, DPO for LLM)
+- **22 Algorithms**: PPO, SAC, DQN, TD3, A2C, VPG, TRPO, MAPPO, DreamerV3, IMPALA, CrossQ, TQC, Recurrent PPO, PQN, and more (+ GRPO, DPO for LLM).
+  **6 are convergence-validated** (PPO, SAC, TD3, DQN, A2C, TRPO); the other 16 are
+  implemented and unit-tested but *not* convergence-validated, and emit a
+  `UserWarning` when constructed. Check `Trainer(...).status`, or see the
+  [maturity table](https://wojciechkpl.github.io/rlox/python/algorithms/#maturity-status).
 - **Trainers**: Each algorithm has a high-level `Trainer` with `train()`, `save()`, `from_checkpoint()`, `predict()`
 - **Environments**: Gymnasium-compatible, Rayon-parallel VecEnv, CartPole and Pendulum-v1 built-in
 - **Visual RL wrappers**: `FrameStack`, `ImagePreprocess`, `AtariWrapper`, `DMControlWrapper` for pixel-based RL
