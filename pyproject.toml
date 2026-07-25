@@ -32,7 +32,18 @@ dependencies = [
 [project.optional-dependencies]
 mujoco = ["gymnasium[mujoco]"]
 gpu = ["torch>=2.0"]
-dev = ["pytest", "pyyaml"]
+dev = [
+    "pytest",
+    "pytest-timeout",
+    "pyyaml",
+    # TOML round-tripping for the agentic benchmark launchers and their tests.
+    # tomllib is stdlib from 3.11; tomli is the 3.10 backport.
+    "tomli; python_version < '3.11'",
+    "tomli-w",
+]
+# `all` is what the CI wheel-smoke job installs; keep it a superset of the
+# extras that do not need a GPU or an optional external service.
+all = ["rlox[dev,mujoco]"]
 
 [project.scripts]
 rlox = "rlox.__main__:main"
