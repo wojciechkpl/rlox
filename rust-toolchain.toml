@@ -1,0 +1,14 @@
+# Pin the toolchain so `cargo clippy` locally is byte-for-byte the same lint set
+# CI enforces. Clippy gains new lints on every stable release, so an unpinned
+# `stable` meant CI could fail on lints a developer's older local toolchain did
+# not know about (this happened: doc_overindented_list_items landed in CI's 1.97
+# while a local 1.90 saw nothing).
+#
+# Bumping: raise `channel`, then run `bash scripts/check-ci-local.sh` and fix any
+# newly-surfaced lints in the same commit.
+[toolchain]
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]
+# rlox-sandbox is Linux-only, so its lints are invisible on a macOS host unless
+# checked against a Linux target. scripts/check-ci-local.sh relies on this.
+targets = ["x86_64-unknown-linux-gnu"]

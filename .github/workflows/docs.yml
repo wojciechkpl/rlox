@@ -77,6 +77,11 @@ jobs:
 
   deploy:
     needs: build
+    # The github-pages environment only permits deploys from the default branch,
+    # so a workflow_dispatch on a feature branch would otherwise fail the run
+    # with "Branch ... is not allowed to deploy to github-pages". Skip instead:
+    # dispatching from a branch still exercises `build` as a docs smoke test.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
