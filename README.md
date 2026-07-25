@@ -267,8 +267,14 @@ SAC HalfCheetah: rlox 10872 vs SB3 10796 — statistically identical, both beat 
 ## Running Tests
 
 ```bash
-# Rust tests across all crates (rlox-core, rlox-sandbox, rlox-rl-ops, etc.)
-cargo test --workspace
+# Everything CI checks, in one command (recommended before pushing).
+# Scope with `rust` / `python`; add WK=1 to include the Linux sandbox suite.
+bash scripts/check-ci-local.sh
+
+# Rust tests across all crates. --no-fail-fast matters: without it cargo stops at
+# the first failing test *binary* and later binaries' failures stay hidden.
+# On macOS add `--exclude rlox-sandbox` — that crate is Linux-only.
+cargo test --workspace --no-fail-fast
 
 # Python tests (build the extension into the venv, then run pytest)
 uv run maturin develop --release
@@ -279,9 +285,9 @@ uv run pytest tests/python/ -m "not slow" -q
 
 # Single crate
 cargo test --package rlox-core
-cargo test --package rlox-sandbox
+cargo test --package rlox-sandbox   # Linux only
 
-# All tests (Rust + Python)
+# Fast inner loop (rlox-core + pytest; not a CI-parity check)
 ./scripts/test.sh
 
 # Agentic-RL benchmark (single-GPU GRPO on Linux with cgroup v2)
