@@ -13,7 +13,8 @@
 ///   - Child exits with code 0 if the syscall was correctly blocked (EPERM/ENOSYS/SIGSYS).
 ///   - Child exits with code 1 if the syscall succeeded (filter not installed).
 ///   - Child exits with code 2 if the filter installation itself errored.
-///   The parent asserts exit code == 0.
+///
+/// The parent asserts exit code == 0.
 #[cfg(target_os = "linux")]
 mod seccomp_tests {
     use nix::sys::wait::{waitpid, WaitStatus};

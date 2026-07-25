@@ -40,6 +40,7 @@
 ///     sandboxed Python never sees rc == 0 from either call.
 ///   - When cgroup_base does not exist, run_sandboxed must return Err, not
 ///     silently execute untrusted code with no resource containment.
+
 #[cfg(target_os = "linux")]
 mod adversarial_containment {
     use rlox_sandbox::worker::{run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput};
@@ -56,23 +57,12 @@ mod adversarial_containment {
     }
 
     // -----------------------------------------------------------------------
-    // Gate for the real-bomb tests (fork bomb, memory bomb, pids exhaustion).
-    //
-    // These detonate genuine resource bombs and require TWO things the CI shared
-    // runners don't provide: (a) cgroup v2 **self-migration** into a leaf, which
-    // only works inside a user-delegated slice (leaf *creation* alone works on
-    // CI — see cgroup_tests.rs — but the child can't migrate itself in, so the
-    // bomb escapes containment); and (b) a scope-level TasksMax/MemoryMax
-    // backstop bounding the blast radius. Both are set up by
-    // `scripts/wk-sync-test.sh` (systemd-run --slice=rlox.slice), which exports
-    // `RLOX_SANDBOX_ADVERSARIAL_TESTS=1`. When that is unset (CI, a plain SSH
-    // session, any non-delegated host) these tests skip: running a fork bomb
-    // there would neither be contained nor backstopped, which is both useless
-    // and unsafe. Opt-in is deliberate for adversarial code.
+    // The real-bomb tests below (fork bomb, memory bomb, pids exhaustion) are
+    // gated on `RLOX_SANDBOX_ADVERSARIAL_TESTS` via
+    // `crate::common::adversarial_tests_enabled()`. See tests/common/mod.rs for
+    // what the gate requires and why it is an explicit opt-in rather than a
+    // runtime probe.
     // -----------------------------------------------------------------------
-    fn adversarial_tests_enabled() -> bool {
-        std::env::var_os("RLOX_SANDBOX_ADVERSARIAL_TESTS").is_some()
-    }
 
     // -----------------------------------------------------------------------
     // Helper: a SandboxConfig with tight resource caps.
@@ -185,7 +175,7 @@ mod adversarial_containment {
     // -----------------------------------------------------------------------
     #[tokio::test(flavor = "multi_thread")]
     async fn test_fork_bomb_is_fully_contained() {
-        if !adversarial_tests_enabled() {
+        if !crate::common::adversarial_tests_enabled() {
             eprintln!(
                 "SKIP test_fork_bomb_is_fully_contained: set \
                  RLOX_SANDBOX_ADVERSARIAL_TESTS=1 under a cgroup-delegated slice \
@@ -272,7 +262,7 @@ mod adversarial_containment {
     // -----------------------------------------------------------------------
     #[tokio::test(flavor = "multi_thread")]
     async fn test_pids_limit_caps_fork_bomb() {
-        if !adversarial_tests_enabled() {
+        if !crate::common::adversarial_tests_enabled() {
             eprintln!(
                 "SKIP test_pids_limit_caps_fork_bomb: set \
                  RLOX_SANDBOX_ADVERSARIAL_TESTS=1 under a cgroup-delegated slice \
@@ -328,7 +318,7 @@ mod adversarial_containment {
     // -----------------------------------------------------------------------
     #[tokio::test(flavor = "multi_thread")]
     async fn test_memory_bomb_is_oom_killed() {
-        if !adversarial_tests_enabled() {
+        if !crate::common::adversarial_tests_enabled() {
             eprintln!(
                 "SKIP test_memory_bomb_is_oom_killed: set \
                  RLOX_SANDBOX_ADVERSARIAL_TESTS=1 under a cgroup-delegated slice \
@@ -525,3 +515,9 @@ sys.exit(0)
 
 #[cfg(target_os = "linux")]
 extern crate libc;
+
+// Shared capability gates (RLOX_SANDBOX_CGROUP_TESTS /
+// RLOX_SANDBOX_ADVERSARIAL_TESTS). Declared at the end of the file so it
+// cannot absorb the module doc comment above.
+#[cfg(target_os = "linux")]
+mod common;

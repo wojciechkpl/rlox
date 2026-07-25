@@ -319,6 +319,11 @@ mod server_contract_tests {
 
     #[tokio::test]
     async fn test_post_rollout_response_backend_stats_has_all_fields() {
+        if crate::common::skip_without_cgroups(
+            "test_post_rollout_response_backend_stats_has_all_fields",
+        ) {
+            return;
+        }
         let vllm_addr = start_mock_vllm(vec!["pass".to_string()]).await;
 
         let req = RolloutRequest {
@@ -407,8 +412,8 @@ mod server_contract_tests {
             "adversarial_injected must equal the number of adversarial completions \
              (group_size × adversarial_tasks = 1 × 1 = 1)"
         );
-        assert_eq!(
-            resp.trajectories[0].is_adversarial, true,
+        assert!(
+            resp.trajectories[0].is_adversarial,
             "Trajectory must echo the is_adversarial flag from the request task"
         );
     }
@@ -614,3 +619,9 @@ mod server_contract_tests {
         );
     }
 }
+
+// Shared capability gates (RLOX_SANDBOX_CGROUP_TESTS /
+// RLOX_SANDBOX_ADVERSARIAL_TESTS). Declared at the end of the file so it
+// cannot absorb the module doc comment above.
+#[cfg(target_os = "linux")]
+mod common;

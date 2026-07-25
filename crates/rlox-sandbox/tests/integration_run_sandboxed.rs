@@ -17,6 +17,7 @@
 ///   - `timeout_secs` of 3.0 is enough for a trivial `print("ok")` script.
 ///   - After Timeout, `time_to_contain_secs` is the wall-clock from timeout
 ///     detection to the moment `cgroup.kill` is written (not the total).
+
 #[cfg(target_os = "linux")]
 mod integration_run_sandboxed {
     use rlox_sandbox::worker::{run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput};
@@ -59,6 +60,11 @@ mod integration_run_sandboxed {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_benign_code_returns_clean_exit_and_full_pass_rate() {
+        if crate::common::skip_without_cgroups(
+            "test_benign_code_returns_clean_exit_and_full_pass_rate",
+        ) {
+            return;
+        }
         let code = r#"
 def add(a, b):
     return a + b
@@ -113,6 +119,11 @@ assert add(1, 2) == 3, "add(1, 2) should be 3"
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_infinite_sleep_returns_timeout_with_cgroup_kill_events() {
+        if crate::common::skip_without_cgroups(
+            "test_infinite_sleep_returns_timeout_with_cgroup_kill_events",
+        ) {
+            return;
+        }
         let code = "import time\ntime.sleep(9999)\n";
         let test_suite = ""; // no test suite needed — process never reaches it
 
@@ -155,6 +166,9 @@ assert add(1, 2) == 3, "add(1, 2) should be 3"
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_wall_secs_is_positive_for_timeout_path() {
+        if crate::common::skip_without_cgroups("test_wall_secs_is_positive_for_timeout_path") {
+            return;
+        }
         let code = "import time\ntime.sleep(9999)\n";
         let timeout_secs = 2.0f64;
         let config = default_config(timeout_secs);
@@ -215,3 +229,9 @@ assert add(1, 2) == 3, "add(1, 2) should be 3"
 
 #[cfg(target_os = "linux")]
 extern crate libc;
+
+// Shared capability gates (RLOX_SANDBOX_CGROUP_TESTS /
+// RLOX_SANDBOX_ADVERSARIAL_TESTS). Declared at the end of the file so it
+// cannot absorb the module doc comment above.
+#[cfg(target_os = "linux")]
+mod common;
