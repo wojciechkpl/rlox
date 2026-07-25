@@ -118,6 +118,10 @@ jobs:
     name: Slow tests (convergence)
     needs: python-collect
     runs-on: ubuntu-latest
+    # This job had no cap while legitimately taking ~40 min, so a hung test could
+    # have burned up to the 6 h default. 90 min leaves headroom over the observed
+    # runtime; the per-test --timeout below is the finer-grained guard.
+    timeout-minutes: 90
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
@@ -132,8 +136,10 @@ jobs:
           python -m pip install pytest pytest-timeout gymnasium torch numpy pyyaml "gymnasium[mujoco]"
       # Slow tests are CI smoke checks with reduced training budgets.
       # Full convergence validation runs in the multi-seed GCP sweep.
-      # 600s timeout gives enough headroom for SAC on GitHub Actions
-      # runners (~2x slower than Apple M3 Pro on MuJoCo envs).
+      # 600s per test gives enough headroom for SAC on GitHub Actions
+      # runners (~2x slower than Apple M3 Pro on MuJoCo envs). A test whose
+      # algorithm is heavier than SAC — e.g. TQC's 5-network quantile ensemble —
+      # raises its own budget with @pytest.mark.timeout(N), which overrides this.
       - run: python -m pytest tests/ -q --tb=short -m "slow" --timeout=600
 
   wheel-smoke:

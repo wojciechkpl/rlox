@@ -18,9 +18,13 @@
 #   bash scripts/check-ci-local.sh rust       # rust gates only
 #   bash scripts/check-ci-local.sh python     # python gates only
 #
-# Runs the FULL Linux sandbox test suite only on wk-system (see
-# scripts/wk-sync-test.sh); those tests need cgroup v2 delegation this host
-# lacks. Pass WK=1 to include them.
+# Two opt-in gates are off by default because they are slow:
+#   SLOW=1  the convergence tests. CI runs these on pushes to main ONLY, so a
+#           regression here cannot be caught by a PR — it turns main red after
+#           merge. Use before merging anything touching a training path or a
+#           convergence threshold. (~20-40 min)
+#   WK=1    the full Linux sandbox suite, on wk-system (see wk-sync-test.sh);
+#           those tests need cgroup v2 delegation this host lacks.
 set -uo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -116,10 +120,14 @@ if [ "$SCOPE" = all ] || [ "$SCOPE" = python ]; then
   # tests/test_repo_hygiene.py additionally catches this statically on any version.
   if command -v uv >/dev/null 2>&1; then
     PY310_VENV="${TMPDIR:-/tmp}/rlox-check-venv310"
-    # --allow-existing so the venv is cached across runs (provisioning is ~1 s
-    # cold, near-free warm). Provisioning errors are reported, not swallowed: a
-    # gate that quietly disappears is the failure mode this script exists to stop.
-    if provision=$(uv venv --python 3.10 --allow-existing "$PY310_VENV" 2>&1 &&
+    # --clear: build the venv fresh every run. Reusing it via --allow-existing
+    # rewrites the venv while leaving stale site-packages metadata behind, which
+    # made `uv pip install` fail on a half-installed package. uv's package cache
+    # makes a clean rebuild ~1 s cold and effectively free warm, so there is
+    # nothing to gain from reuse and a whole class of stale-state bugs to avoid.
+    # Provisioning errors are reported, not swallowed: a gate that quietly
+    # disappears is the failure mode this script exists to prevent.
+    if provision=$(uv venv --python 3.10 --clear "$PY310_VENV" 2>&1 &&
          VIRTUAL_ENV="$PY310_VENV" uv pip install -q \
            pytest pytest-timeout pyyaml tomli tomli-w numpy 2>&1); then
       run_gate "pytest tests/agentic on Python 3.10 (oldest supported)" \
@@ -131,6 +139,18 @@ if [ "$SCOPE" = all ] || [ "$SCOPE" = python ]; then
   else
     printf '\n\033[1;33m==> SKIPPED 3.10 gate: uv not found; install uv, or rely on CI'"'"'s 3.10-3.13 matrix.\033[0m\n'
   fi
+fi
+
+# --- Slow convergence tests (opt-in) ---------------------------------------
+# CI runs these only on pushes to main, so a slow-test regression cannot be caught
+# by a PR — it lands on main and turns it red after merge. That is exactly how
+# TQC's convergence test broke main: it had never run on a PR. ~20-40 min, hence
+# opt-in rather than default. Run before merging anything that touches an
+# algorithm's training path or a convergence threshold.
+if [ "${SLOW:-0}" = 1 ] && { [ "$SCOPE" = all ] || [ "$SCOPE" = python ]; }; then
+  PY="$(python_bin)"
+  run_gate "pytest slow convergence tests (CI runs these on main only)" \
+    "$PY" -m pytest tests/ -q --tb=short -m "slow" --timeout=600 --timeout-method=thread
 fi
 
 # --- Linux sandbox suite (opt-in) ------------------------------------------

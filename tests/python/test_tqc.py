@@ -856,6 +856,16 @@ class TestTQCConvergence:
     """
 
     @pytest.mark.slow
+    # TQC trains an ensemble of n_critics=5 quantile networks (25 quantiles each),
+    # so ~19k gradient steps here cost far more than SAC's single critic pair —
+    # and the slow job's global --timeout=600 was calibrated for SAC. Measured
+    # 351 s locally (Apple silicon); GitHub runners are ~2x slower on these envs,
+    # which put it just over 600 s and failed the job at 40 min in. 1200 s is
+    # ~3.4x the local time, leaving headroom for runner variance without relaxing
+    # the budget for every other slow test. Prefer this over cutting
+    # total_timesteps: the -250 threshold below is calibrated to 20k steps, so a
+    # smaller budget would mean weakening the assertion.
+    @pytest.mark.timeout(1200)
     def test_tqc_greedy_eval_solves_pendulum(self):
         from rlox.algorithms.tqc import TQC
 

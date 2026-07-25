@@ -30,12 +30,16 @@ python -c "import rlox; print('rlox ready')"
 # test *binary* and later binaries' failures stay hidden.
 cargo test --workspace --no-fail-fast
 
-# Python tests (900+ tests, after maturin develop)
-pip install -e ".[all]"
-pytest tests/python/ -q
+# Python tests — run `tests/`, not `tests/python/`, which is what CI runs.
+# `tests/python/` alone collects 1583 of 2233 tests, skipping tests/agentic/ and
+# the repo-hygiene guards. That narrower path is why a conftest collision between
+# tests/agentic/ and tests/python/ went unnoticed locally while it was aborting
+# collection for the entire suite in CI.
+pip install -e ".[all]"          # after maturin develop
+pytest tests/ -q
 
 # Quick smoke test (skip slow integration tests)
-pytest tests/python/ -m "not slow" -q
+pytest tests/ -m "not slow" -q
 
 # Specific test file
 pytest tests/python/test_offline_rl.py -v
@@ -78,8 +82,15 @@ Run every CI gate locally in one command:
 ```bash
 bash scripts/check-ci-local.sh          # all gates
 bash scripts/check-ci-local.sh rust     # or just one half
+SLOW=1 bash scripts/check-ci-local.sh   # + the convergence tests (~20-40 min)
 WK=1 bash scripts/check-ci-local.sh     # + the Linux sandbox suite on wk-system
 ```
+
+**Use `SLOW=1` before merging anything that touches an algorithm's training path
+or a convergence threshold.** CI runs the convergence tests on pushes to `main`
+*only*, so a regression there cannot be caught by a PR — it turns `main` red after
+merge. That is exactly how TQC's convergence test broke `main`: the job had never
+run on the PR that introduced it.
 
 Install the pre-push hook once and the fast gates run automatically:
 

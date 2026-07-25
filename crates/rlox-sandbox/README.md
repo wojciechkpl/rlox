@@ -37,24 +37,45 @@ The sandbox defends against five adversarial categories using layered mechanisms
 # Build the crate
 cargo build -p rlox-sandbox
 
-# Run all tests (requires cgroup v2 user delegation)
-cargo test -p rlox-sandbox
+# Run all tests. --no-fail-fast matters: cargo otherwise stops at the first
+# failing test *binary* and later binaries' failures stay hidden.
+cargo test -p rlox-sandbox --no-fail-fast
 ```
+
+Most tests here need host capabilities a plain shell (or a CI runner) does not
+have, so they are gated behind two opt-in environment variables — see
+`tests/common/mod.rs`:
+
+| Variable | Unlocks | Requires |
+| --- | --- | --- |
+| `RLOX_SANDBOX_CGROUP_TESTS` | every test that calls `run_sandboxed` and asserts on the exit status (12 tests across 5 binaries) | cgroup v2 **self-migration** — the process must already sit inside a user-delegated cgroup scope |
+| `RLOX_SANDBOX_ADVERSARIAL_TESTS` | tests that detonate real fork/memory/pids bombs (4 tests) | the above, plus a scope-level `TasksMax`/`MemoryMax` backstop |
+
+Without them the sandbox child cannot enter its cgroup leaf, so `run_sandboxed`
+returns `SetupError("child could not write to cgroup.procs …")` and every
+`Clean`/`Timeout`/`OomKilled` assertion would be checking a setup failure rather
+than containment. Those tests therefore skip, printing `SKIP <name>: …` (visible
+with `-- --nocapture`), instead of passing vacuously or failing.
+
+`scripts/wk-sync-test.sh` sets both. They are explicit opt-ins rather than runtime
+probes on purpose: on a host that *is* supposed to have the capability, a
+regression must fail loudly instead of silently self-skipping.
 
 ### Integration with CI/CD (macOS, Linux)
 
 The crate **cannot build on macOS** (no Linux namespaces). Use the sync-test helper to run tests on the Linux target host:
 
 ```bash
-# From the workspace root (rlox-workspace/)
-bash scripts/wk-sync-test.sh 'cargo test -p rlox-sandbox -v'
+# From the repo root
+bash scripts/wk-sync-test.sh 'cargo test -p rlox-sandbox --no-fail-fast'
 ```
 
 This script:
-1. Syncs the workspace to `wk-system` (Ubuntu 24.04, kernel 6.17+)
-2. Wraps the test binary in `systemd-run --user --scope --slice=rlox.slice` to ensure cgroup v2 user delegation is available
-3. Applies safety backstops: `TasksMax=100` and `MemoryMax=2 GiB` to prevent runaway adversarial tests from affecting the host
-4. Returns the exit code and output
+1. Syncs the repo to `wk-system` (Ubuntu 24.04, kernel 6.17+)
+2. Wraps the test binary in `systemd-run --user --scope --slice=rlox.slice` so cgroup v2 user delegation is available (an interactive SSH session lands in a root-owned `session-N.scope`, where self-migration fails)
+3. Applies safety backstops — `TasksMax=4096` and `MemoryMax=24G` by default, tunable via `WK_TASKS_MAX` / `WK_MEM_MAX` — so a containment bug cannot exhaust host PIDs or RAM
+4. Exports `RLOX_SANDBOX_CGROUP_TESTS=1` and `RLOX_SANDBOX_ADVERSARIAL_TESTS=1`, since only this scope satisfies both
+5. Returns the exit code and output
 
 ### Adversarial Test Execution
 
@@ -70,13 +91,29 @@ bash scripts/wk-sync-test.sh 'cargo test -p rlox-sandbox adversarial_containment
 
 ### Test Suite Overview
 
-- **`integration_run_sandboxed.rs`** (3 tests): Benign code execution, timeout enforcement, wall-clock timing.
-- **`adversarial_containment.rs`** (7 tests): Fork bombs, memory bombs, stdout flooding, nested user-namespace denial, cgroup base validation.
-- **`namespace_tests.rs`** (4 tests): Namespace isolation, UID/GID mapping, mount namespace marking.
-- **`cgroup_tests.rs`** (5 tests): Leaf creation, resource limit setting, freeze/kill operations.
-- **`seccomp_tests.rs`** (3 tests): Filter building, CLONE_NEWUSER conditional denial, allowlist completeness.
+Counts below are from a full delegated run on `wk-system` (both gates set).
+`(gated)` marks binaries containing tests that skip without the capability vars.
 
-**Total: 22 tests** covering happy-path execution, timeouts, and adversarial containment.
+- **`integration_run_sandboxed.rs`** (4 tests, gated): Benign code execution, timeout enforcement, wall-clock timing, unsupported-language `SetupError`.
+- **`adversarial_containment.rs`** (5 tests, gated): Fork bombs, memory bombs, pids exhaustion, stdout flooding, nested user-namespace denial.
+- **`corpus_containment.rs`** (4 tests, gated): Corpus digest/category integrity (ungated) plus per-sample containment (gated).
+- **`security_isolation.rs`** (6 tests, gated): Host-file access, `/proc` scoping, socket-fd leakage.
+- **`server_contract.rs`** (8 tests, gated): `POST /rollout` HTTP contract, `BackendStats` fields, vLLM-unreachable → 502.
+- **`rollout_pipeline.rs`** (8 tests, gated): Full vLLM → sandbox → group-advantage pipeline and containment telemetry.
+- **`verify_endpoint.rs`** (4 tests, gated): `POST /verify` reward contract and adversarial containment.
+- **`backend_stats_serde.rs`** (8 tests): Rust↔Python `BackendStats` wire-format round-trip.
+- **`cgroup_tests.rs`** (6 tests): Leaf creation, resource-limit setting, freeze/kill operations.
+- **`namespace_tests.rs`** (3 tests): Namespace isolation, UID/GID mapping, mount-namespace marking.
+- **`seccomp_tests.rs`** (4 tests): Filter building, `CLONE_NEWUSER` conditional denial, allowlist completeness.
+
+**Total: 61 tests** (60 integration + 1 doctest) covering happy-path execution,
+timeouts, adversarial containment, and the HTTP contracts.
+
+Both environments report `61 passed; 0 failed`. The gates return early rather than
+using a skip attribute, so cargo counts a gated-out test as passed — on CI 16 of
+the 61 are no-ops that print `SKIP <name>: …`. Run with `-- --nocapture` to see
+which, and do not read a green CI run as proof that containment was exercised;
+only a delegated host does that.
 
 ## Platform Requirements
 
