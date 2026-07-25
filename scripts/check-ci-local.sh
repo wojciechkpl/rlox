@@ -40,7 +40,10 @@ FAILED=()
 PASSED=()
 
 # Override .cargo/config.toml's target-cpu=native, matching ci.yml.
-export CARGO_BUILD_RUSTFLAGS=""
+# Must be CARGO_ENCODED_RUSTFLAGS: cargo treats an empty
+# CARGO_BUILD_RUSTFLAGS as unset and falls back to the config file, so that
+# spelling is a silent no-op (verified).
+export CARGO_ENCODED_RUSTFLAGS=""
 
 # pyo3 0.23 supports Python <= 3.13, but a Homebrew `python3` may already be
 # newer (3.14), which makes the pyo3-ffi build script hard-fail and takes the

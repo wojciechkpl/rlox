@@ -111,6 +111,19 @@ The toolchain is pinned in `rust-toolchain.toml` so local clippy enforces exactl
 the lint set CI does. Clippy adds lints every release; an unpinned `stable` meant
 CI could fail on lints an older local toolchain never reported.
 
+### `target-cpu=native` and portability
+
+`.cargo/config.toml` sets `build.rustflags = ["-C", "target-cpu=native"]`, so
+local builds are tuned for your CPU. That must never leak into CI or a release:
+CI shares a build cache across runners with different CPU features (a proc-macro
+dylib from another runner kills `rustc` with `SIGILL`), and a published wheel has
+to run on any CPU of its architecture.
+
+Every Rust-building workflow therefore sets `CARGO_ENCODED_RUSTFLAGS: ""`. Use
+that spelling — **`CARGO_BUILD_RUSTFLAGS: ""` does not work**: cargo treats an
+empty value for that key as unset and falls back to the config file, so it is a
+silent no-op. `tests/test_repo_hygiene.py` enforces both halves of this.
+
 ### Python version matrix
 
 `requires-python` is `>=3.10` and CI runs a 3.10–3.13 matrix, but your venv is a

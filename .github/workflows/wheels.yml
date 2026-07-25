@@ -7,6 +7,16 @@ on:
 
 env:
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+  # Neutralise .cargo/config.toml's `build.rustflags = ["-C", "target-cpu=native"]`.
+  # Native tuning must never reach a published wheel: these are distributed as
+  # generic manylinux/macosx/win wheels, so a wheel built on a runner with (say)
+  # AVX-512 crashes with SIGILL on any user CPU lacking it. Local builds keep
+  # native tuning via the config file; releases must be portable.
+  #
+  # Must be CARGO_ENCODED_RUSTFLAGS: cargo treats an empty CARGO_BUILD_RUSTFLAGS
+  # as unset and falls back to the config file (verified), making that spelling a
+  # silent no-op.
+  CARGO_ENCODED_RUSTFLAGS: ""
 
 jobs:
   build-wheels:
@@ -42,6 +52,11 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --strip --out dist -i python3.10 -i python3.11 -i python3.12 -i python3.13
           manylinux: ${{ matrix.manylinux || 'auto' }}
+          # manylinux builds run inside a container, so the workflow-level
+          # CARGO_ENCODED_RUSTFLAGS must be forwarded explicitly or the container
+          # falls back to .cargo/config.toml and bakes target-cpu=native into the
+          # published wheel. Ignored on the native macOS/Windows runners.
+          docker-options: -e CARGO_ENCODED_RUSTFLAGS
 
       - uses: actions/upload-artifact@v4
         with:

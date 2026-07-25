@@ -38,9 +38,11 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-# Matches .github/workflows/ci.yml (and .cargo/config.toml's target-cpu=native
-# would otherwise cause SIGILL under cached proc-macro dylibs).
-export CARGO_BUILD_RUSTFLAGS=""
+# Override .cargo/config.toml's target-cpu=native, matching ci.yml.
+# Must be CARGO_ENCODED_RUSTFLAGS: cargo treats an empty
+# CARGO_BUILD_RUSTFLAGS as unset and falls back to the config file, so that
+# spelling is a silent no-op (verified).
+export CARGO_ENCODED_RUSTFLAGS=""
 
 # pyo3 0.23 supports Python <= 3.13; a newer system python3 hard-fails the
 # pyo3-ffi build script. The repo venv is on a supported version.

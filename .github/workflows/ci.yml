@@ -9,10 +9,16 @@ on:
 env:
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
   CARGO_TERM_COLOR: always
-  # Override .cargo/config.toml's target-cpu=native which causes SIGILL
-  # in CI when Swatinem/rust-cache serves proc-macro dylibs compiled on
-  # a runner with different CPU features than the current one.
-  CARGO_BUILD_RUSTFLAGS: ""
+  # Override .cargo/config.toml's target-cpu=native, which causes SIGILL in CI
+  # when Swatinem/rust-cache serves proc-macro dylibs compiled on a runner with
+  # different CPU features than the current one.
+  #
+  # This MUST be CARGO_ENCODED_RUSTFLAGS, not CARGO_BUILD_RUSTFLAGS: cargo treats
+  # an empty CARGO_BUILD_RUSTFLAGS as unset and falls back to `build.rustflags`
+  # from the config file, so the previous setting was a silent no-op and the
+  # SIGILL it was meant to prevent kept recurring. CARGO_ENCODED_RUSTFLAGS is
+  # \x1f-separated and an empty value unambiguously means "no flags".
+  CARGO_ENCODED_RUSTFLAGS: ""
 
 jobs:
   rust-tests:

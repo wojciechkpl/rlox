@@ -5,6 +5,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  # Same reason as ci.yml: neutralise .cargo/config.toml's target-cpu=native so a
+  # cached proc-macro dylib built on a different runner cannot SIGILL. Must be
+  # CARGO_ENCODED_RUSTFLAGS — an empty CARGO_BUILD_RUSTFLAGS is silently ignored.
+  CARGO_ENCODED_RUSTFLAGS: ""
+
 permissions:
   contents: read
   pages: write
