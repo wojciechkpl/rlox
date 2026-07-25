@@ -20,7 +20,7 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from conftest import BenchmarkResult, ComparisonResult, timed_run, system_info, write_report
+from harness import BenchmarkResult, ComparisonResult, timed_run, system_info, write_report
 
 # ---------------------------------------------------------------------------
 # Default repetition / warmup constants

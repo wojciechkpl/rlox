@@ -53,12 +53,21 @@ import os
 import stat
 import subprocess
 import textwrap
-import tomllib
 from pathlib import Path
 from typing import Callable
 from unittest.mock import patch
 
 import pytest
+
+# tomllib is stdlib from 3.11; on 3.10 fall back to the tomli backport, which
+# ships in the dev extra. Mirrors the reader in python/rlox/config.py.
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    tomllib = pytest.importorskip(
+        "tomli",
+        reason="TOML reader required: stdlib tomllib is 3.11+; install the 'tomli' backport",
+    )
 
 # benchmarks/agentic/ is on sys.path via conftest.py.
 # RED phase: make_primerl_run_one does not exist in run_benchmark yet.
