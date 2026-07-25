@@ -4373,7 +4373,7 @@ dependencies = [
 
 [[package]]
 name = "rlox-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "memmap2",
@@ -4403,7 +4403,7 @@ dependencies = [
 
 [[package]]
 name = "rlox-nn"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "thiserror 2.0.18",
 ]
@@ -4424,7 +4424,7 @@ dependencies = [
 
 [[package]]
 name = "rlox-rl-ops"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "rayon",
  "thiserror 2.0.18",
