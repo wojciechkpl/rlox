@@ -16,7 +16,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(__file__))
-from conftest import system_info
+from harness import system_info
 
 
 def check_phase_available(phase: str) -> bool:

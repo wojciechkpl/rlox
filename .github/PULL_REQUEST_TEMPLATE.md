@@ -8,9 +8,12 @@ Brief description of what this PR does and why.
 
 ## Test plan
 
-- [ ] Existing tests pass (`pytest tests/python/ -q`)
+- [ ] All CI gates pass locally (`bash scripts/check-ci-local.sh`)
 - [ ] New tests added for new functionality
-- [ ] Rust tests pass (`cargo test --workspace`)
+- [ ] If you touched `crates/rlox-sandbox/`: the Linux suite passes
+      (`WK=1 bash scripts/check-ci-local.sh`, or `bash scripts/wk-sync-test.sh
+      'cargo test -p rlox-sandbox --no-fail-fast'`) — macOS cannot build or lint
+      that crate, so a local green run there proves nothing about it
 
 ## Related issues
 

@@ -26,8 +26,9 @@ python -c "import rlox; print('rlox ready')"
 ## Running Tests
 
 ```bash
-# Rust tests (412 tests across all crates)
-cargo test --workspace
+# Rust tests. --no-fail-fast matters: without it cargo stops at the first failing
+# test *binary* and later binaries' failures stay hidden.
+cargo test --workspace --no-fail-fast
 
 # Python tests (900+ tests, after maturin develop)
 pip install -e ".[all]"
@@ -43,17 +44,106 @@ pytest tests/python/test_offline_rl.py -v
 pytest tests/python/test_algorithm_smoke.py -v
 ```
 
+### The Linux-only sandbox tests
+
+`rlox-sandbox` builds and runs on Linux only, and many of its tests need host
+capabilities a CI shared runner cannot provide. They are gated by two env vars
+(see `crates/rlox-sandbox/tests/common/mod.rs`):
+
+| Variable | Unlocks | Requires |
+| --- | --- | --- |
+| `RLOX_SANDBOX_CGROUP_TESTS` | every test that calls `run_sandboxed` and asserts on the exit status | cgroup v2 **self-migration** — the process must already sit inside a user-delegated cgroup scope |
+| `RLOX_SANDBOX_ADVERSARIAL_TESTS` | tests that detonate real fork/memory/pids bombs | the above, plus a scope-level `TasksMax`/`MemoryMax` backstop |
+
+Without them the sandbox child cannot enter its cgroup leaf, `run_sandboxed`
+returns `SetupError("child could not write to cgroup.procs …")`, and every
+containment assertion becomes vacuous — so those tests skip with an explicit
+`SKIP <name>: …` line (visible with `-- --nocapture`) instead of failing.
+
+`scripts/wk-sync-test.sh` exports both and wraps the run in
+`systemd-run --user --scope --slice=rlox.slice`, so the full suite runs there:
+
+```bash
+bash scripts/wk-sync-test.sh 'cargo test -p rlox-sandbox --no-fail-fast'
+```
+
+The gates are explicit opt-ins rather than runtime probes on purpose: on the host
+that is supposed to have the capability, a regression must fail loudly instead of
+silently self-skipping.
+
+## Before you push
+
+Run every CI gate locally in one command:
+
+```bash
+bash scripts/check-ci-local.sh          # all gates
+bash scripts/check-ci-local.sh rust     # or just one half
+WK=1 bash scripts/check-ci-local.sh     # + the Linux sandbox suite on wk-system
+```
+
+Install the pre-push hook once and the fast gates run automatically:
+
+```bash
+bash scripts/install-git-hooks.sh
+```
+
 ## Code Style
 
 ```bash
 # Rust
 cargo fmt --all
-cargo clippy --workspace
+
+# NOTE: plain `cargo clippy --workspace` FAILS on macOS — rlox-sandbox is
+# Linux-only (namespaces, seccomp, cgroup v2) and its `seccompiler` dependency
+# does not compile against a macOS libc. Lint it against a Linux target instead,
+# otherwise every lint inside `#[cfg(target_os = "linux")]` stays invisible until
+# CI runs. Both commands are what check-ci-local.sh does for you:
+cargo clippy --workspace --exclude rlox-sandbox --all-targets
+rustup target add x86_64-unknown-linux-gnu   # once
+cargo clippy -p rlox-sandbox --all-targets --target x86_64-unknown-linux-gnu
 
 # Python
 ruff check python/
 ruff format python/
 ```
+
+The toolchain is pinned in `rust-toolchain.toml` so local clippy enforces exactly
+the lint set CI does. Clippy adds lints every release; an unpinned `stable` meant
+CI could fail on lints an older local toolchain never reported.
+
+### `target-cpu=native` and portability
+
+`.cargo/config.toml` sets `build.rustflags = ["-C", "target-cpu=native"]`, so
+local builds are tuned for your CPU. That must never leak into CI or a release:
+CI shares a build cache across runners with different CPU features (a proc-macro
+dylib from another runner kills `rustc` with `SIGILL`), and a published wheel has
+to run on any CPU of its architecture.
+
+Every Rust-building workflow therefore sets `CARGO_ENCODED_RUSTFLAGS: ""`. Use
+that spelling — **`CARGO_BUILD_RUSTFLAGS: ""` does not work**: cargo treats an
+empty value for that key as unset and falls back to the config file, so it is a
+silent no-op. `tests/test_repo_hygiene.py` enforces both halves of this.
+
+### Python version matrix
+
+`requires-python` is `>=3.10` and CI runs a 3.10–3.13 matrix, but your venv is a
+single version — so version-gated code fails only on CI. The classic case is a
+3.11+ stdlib module imported without its 3.10 backport:
+
+```python
+try:
+    import tomllib          # stdlib from 3.11
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
+```
+
+`rlox.config._load_toml` implements this; reuse it where you can import from
+`rlox`. Two guards cover the gap: `tests/test_repo_hygiene.py` catches unguarded
+version-gated imports statically (any interpreter), and
+`scripts/check-ci-local.sh` runs `tests/agentic/` on 3.10 in a throwaway `uv`
+venv. Both exist because this bug shipped in the `rlox train --config x.toml` CLI
+path and in the prime-rl launcher, where a broad `except Exception` turned the
+`ModuleNotFoundError` into a silent "reward 0.0".
 
 ## Project Structure
 

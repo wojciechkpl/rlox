@@ -9,10 +9,16 @@ on:
 env:
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
   CARGO_TERM_COLOR: always
-  # Override .cargo/config.toml's target-cpu=native which causes SIGILL
-  # in CI when Swatinem/rust-cache serves proc-macro dylibs compiled on
-  # a runner with different CPU features than the current one.
-  CARGO_BUILD_RUSTFLAGS: ""
+  # Override .cargo/config.toml's target-cpu=native, which causes SIGILL in CI
+  # when Swatinem/rust-cache serves proc-macro dylibs compiled on a runner with
+  # different CPU features than the current one.
+  #
+  # This MUST be CARGO_ENCODED_RUSTFLAGS, not CARGO_BUILD_RUSTFLAGS: cargo treats
+  # an empty CARGO_BUILD_RUSTFLAGS as unset and falls back to `build.rustflags`
+  # from the config file, so the previous setting was a silent no-op and the
+  # SIGILL it was meant to prevent kept recurring. CARGO_ENCODED_RUSTFLAGS is
+  # \x1f-separated and an empty value unambiguously means "no flags".
+  CARGO_ENCODED_RUSTFLAGS: ""
 
 jobs:
   rust-tests:
@@ -24,10 +30,36 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install protoc
         run: sudo apt-get install -y protobuf-compiler
-      - run: cargo test --workspace
+      # --no-fail-fast: cargo stops after the first failing test *binary*, which
+      # silently masked failures in 5 later rlox-sandbox test binaries behind one
+      # earlier one. Report every failure in a single run.
+      - run: cargo test --workspace --no-fail-fast
+
+  python-collect:
+    # A single bad import aborts the entire pytest run ("Interrupted: N errors
+    # during collection"), so 2000 healthy tests never execute. This ~30 s job
+    # names the broken module immediately instead of waiting ~4 min for the
+    # matrix to fail four times over.
+    name: Python collection
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"  # oldest supported — catches 3.11+-only imports
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install pytest pytest-timeout gymnasium torch numpy pyyaml
+      - run: python -m pytest tests/ -q --collect-only
 
   python-tests:
     name: Python tests
+    # A collection error means pytest runs nothing at all, so gating loses no
+    # signal — and avoids four matrix jobs spending ~4 min each rediscovering the
+    # same broken import.
+    needs: python-collect
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -84,6 +116,7 @@ jobs:
 
   slow-tests:
     name: Slow tests (convergence)
+    needs: python-collect
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:

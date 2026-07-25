@@ -12,7 +12,7 @@ import os
 # Add benchmarks dir to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks"))
 
-from conftest import BenchmarkResult, ComparisonResult, timed_run, system_info
+from harness import BenchmarkResult, ComparisonResult, timed_run, system_info
 
 
 # ---------------------------------------------------------------------------

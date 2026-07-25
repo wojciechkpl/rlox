@@ -15,6 +15,13 @@ on:
         required: true
         default: 'dry-run'
 
+env:
+  # `cargo publish` runs a verification build; neutralise .cargo/config.toml's
+  # target-cpu=native so it cannot SIGILL on a runner whose CPU differs from
+  # whatever produced a cached artifact. Must be CARGO_ENCODED_RUSTFLAGS — an
+  # empty CARGO_BUILD_RUSTFLAGS is silently ignored by cargo.
+  CARGO_ENCODED_RUSTFLAGS: ""
+
 jobs:
   publish:
     name: Publish rlox library crates

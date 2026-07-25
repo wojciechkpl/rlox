@@ -25,6 +25,12 @@ fails with ImportError/ModuleNotFoundError that is itself a test finding.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
 import pytest
 
 # benchmarks/agentic/ is on sys.path via conftest.py.
@@ -45,12 +51,46 @@ class TestModuleImportNoBadSideEffects:
 
     def test_torch_not_imported_at_module_level(self):
         """Importing trl_grpo_run must not import torch into sys.modules.
-        (Torch is only used lazily inside train() / seed_everything().)"""
-        import sys
+        (Torch is only used lazily inside train() / seed_everything().)
 
-        # After the top-level import of trl_grpo_run (done at test-module load
-        # time), torch must NOT appear in sys.modules.
-        assert "torch" not in sys.modules, (
+        Checked in a *fresh interpreter*: `sys.modules` is process-global, so
+        inspecting it in-process only reports whether some earlier test in the
+        same session already imported torch — which any test that touches rlox
+        does. That made this assertion pass or fail purely on collection order.
+        A subprocess isolates the one thing under test: what importing
+        `trl_grpo_run` alone pulls in.
+        """
+        probe = textwrap.dedent(
+            """
+            import sys
+            import trl_grpo_run  # noqa: F401
+            print("torch" in sys.modules)
+            """
+        )
+        repo_root = Path(__file__).resolve().parents[2]
+        benchmarks_agentic = repo_root / "benchmarks" / "agentic"
+        # The subprocess gets a clean sys.path, so reproduce what conftest.py does
+        # in-process: benchmarks/agentic/ for trl_grpo_run, python/ for rlox_agent.
+        # Without python/ this only passed where rlox_agent happened to be
+        # installed, making the test depend on the environment rather than on the
+        # module under test.
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(benchmarks_agentic), str(repo_root / "python")]
+            + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            cwd=benchmarks_agentic,
+            env=env,
+            timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"importing trl_grpo_run in a fresh interpreter failed:\n{result.stderr}"
+        )
+        assert result.stdout.strip() == "False", (
             "torch was imported at trl_grpo_run module level — this breaks the "
             "light-venv test environment. Move torch imports inside the functions "
             "that need them."

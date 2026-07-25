@@ -17,7 +17,7 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from conftest import BenchmarkResult, write_report
+from harness import BenchmarkResult, write_report
 
 
 DEFAULT_TOTAL_TIMESTEPS = 10_000

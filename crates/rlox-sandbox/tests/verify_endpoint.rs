@@ -176,6 +176,9 @@ mod verify_endpoint_tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_verify_benign_code_returns_reward_1() {
+        if crate::common::skip_without_cgroups("test_verify_benign_code_returns_reward_1") {
+            return;
+        }
         let passing_code = r#"
 def add(a, b):
     return a + b
@@ -306,6 +309,9 @@ def add(a, b):
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_verify_adversarial_infinite_loop_contained() {
+        if crate::common::skip_without_cgroups("test_verify_adversarial_infinite_loop_contained") {
+            return;
+        }
         let inf_loop_code = "while True: pass".to_string();
 
         // is_adversarial=true signals the handler to track containment telemetry.
@@ -431,3 +437,9 @@ def add(a, b):
         );
     }
 }
+
+// Shared capability gates (RLOX_SANDBOX_CGROUP_TESTS /
+// RLOX_SANDBOX_ADVERSARIAL_TESTS). Declared at the end of the file so it
+// cannot absorb the module doc comment above.
+#[cfg(target_os = "linux")]
+mod common;

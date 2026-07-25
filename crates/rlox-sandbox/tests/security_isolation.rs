@@ -41,6 +41,7 @@
 /// specified because the fix may choose different containment strategies
 /// (signal kill vs. EPERM exit, etc.).  Only the OBSERVABLE outcome is tested:
 /// no host file, small /proc count, no socket fd in stdout, no hang.
+
 #[cfg(target_os = "linux")]
 mod security_isolation {
     use rlox_sandbox::worker::{run_sandboxed, SandboxConfig, SandboxInput};
@@ -322,6 +323,9 @@ except Exception as e:
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_proc_is_scoped_to_namespace() {
+        if crate::common::skip_without_cgroups("test_proc_is_scoped_to_namespace") {
+            return;
+        }
         let code = r#"
 import os
 # Count numeric /proc entries — these are PID directories.
@@ -539,3 +543,9 @@ print(f"STDIN_READ_LEN {len(data)}", flush=True)
 
 #[cfg(target_os = "linux")]
 extern crate libc;
+
+// Shared capability gates (RLOX_SANDBOX_CGROUP_TESTS /
+// RLOX_SANDBOX_ADVERSARIAL_TESTS). Declared at the end of the file so it
+// cannot absorb the module doc comment above.
+#[cfg(target_os = "linux")]
+mod common;

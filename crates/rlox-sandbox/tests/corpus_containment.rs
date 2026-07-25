@@ -41,11 +41,11 @@
 /// Where `expected_exit` is deterministic the test also asserts the specific
 /// status:
 ///   - `"timeout"`  → `SandboxExitStatus::Timeout`, with
-///                    `stats.cgroup_kill_event == true` and
-///                    `stats.time_to_contain_secs <= timeout_secs + 1.0`
+///     `stats.cgroup_kill_event == true` and
+///     `stats.time_to_contain_secs <= timeout_secs + 1.0`
 ///   - `"oom"`      → `SandboxExitStatus::OomKilled`
 ///   - `"denied"`   → contained quickly without a cgroup kill: `Clean(nonzero)`
-///                    or `SetupError(_)` — NOT `Timeout`.
+///     or `SetupError(_)` — NOT `Timeout`.
 ///
 /// ## Platform & assumptions
 ///
@@ -57,6 +57,7 @@
 ///     implementation that forwards to the kernel via a /dev/stdin pipe — see
 ///     `sha256_bytes()` below.  The implementer may add `sha2` as a dev-dep
 ///     and replace this helper; the convention above is unchanged.
+
 #[cfg(target_os = "linux")]
 mod corpus_containment {
     use rlox_sandbox::worker::{run_sandboxed, SandboxConfig, SandboxExitStatus, SandboxInput};
@@ -175,6 +176,14 @@ mod corpus_containment {
 
         sha256_hex(canonical.as_bytes())
     }
+
+    // -----------------------------------------------------------------------
+    // Only the sample-detonating test is gated (on
+    // `RLOX_SANDBOX_ADVERSARIAL_TESTS`, via
+    // `crate::common::adversarial_tests_enabled()` — see tests/common/mod.rs).
+    // The corpus-integrity tests below (digest, categories, SHA convention) are
+    // pure data checks, so they stay ungated and CI still guards the corpus.
+    // -----------------------------------------------------------------------
 
     /// Build a SandboxConfig using the per-user delegated cgroup slice.
     /// Uses tight resource caps appropriate for adversarial samples.
@@ -446,6 +455,14 @@ mod corpus_containment {
     // -----------------------------------------------------------------------
     #[tokio::test(flavor = "multi_thread")]
     async fn test_every_corpus_sample_is_contained() {
+        if !crate::common::adversarial_tests_enabled() {
+            eprintln!(
+                "SKIP test_every_corpus_sample_is_contained: set \
+                 RLOX_SANDBOX_ADVERSARIAL_TESTS=1 under a cgroup-delegated slice \
+                 with a resource backstop (see scripts/wk-sync-test.sh)"
+            );
+            return;
+        }
         let corpus = load_corpus();
 
         assert!(
@@ -621,3 +638,9 @@ mod corpus_containment {
 
 #[cfg(target_os = "linux")]
 extern crate libc;
+
+// Shared capability gates (RLOX_SANDBOX_CGROUP_TESTS /
+// RLOX_SANDBOX_ADVERSARIAL_TESTS). Declared at the end of the file so it
+// cannot absorb the module doc comment above.
+#[cfg(target_os = "linux")]
+mod common;

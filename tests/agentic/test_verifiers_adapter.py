@@ -43,7 +43,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import verifiers as vf
+
+# `verifiers` is an optional, heavyweight dependency (pulls vLLM); it is not
+# installed on CI runners or in the light venv. Skip the whole module rather
+# than aborting collection — rlox_agent.verifiers_adapter imports it too.
+vf = pytest.importorskip(
+    "verifiers",
+    reason="requires the optional 'verifiers' package (install with the 'agentic' extra)",
+)
 
 # Top-level imports — never `from rlox.agentic import ...`
 import rlox_agent.adversarial_corpus as ac

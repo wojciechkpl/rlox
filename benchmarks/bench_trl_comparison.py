@@ -20,7 +20,7 @@ import os
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from conftest import BenchmarkResult, ComparisonResult, timed_run, write_report
+from harness import BenchmarkResult, ComparisonResult, timed_run, write_report
 
 # ---------------------------------------------------------------------------
 # Benchmark configurations

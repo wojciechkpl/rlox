@@ -304,15 +304,15 @@ fn test_backend_stats_rust_to_python_round_trip() {
         r#"
 import sys, json, importlib.util
 
-sys.path.insert(0, {python_dir_repr})
-stats_py_path = {stats_py_repr}
+sys.path.insert(0, {python_dir_repr:?})
+stats_py_path = {stats_py_repr:?}
 spec = importlib.util.spec_from_file_location("rlox_agentic_stats", stats_py_path)
 mod = importlib.util.module_from_spec(spec)
 # Register in sys.modules BEFORE exec_module so @dataclass can resolve the module dict.
 sys.modules["rlox_agentic_stats"] = mod
 spec.loader.exec_module(mod)
 
-json_str = {json_repr}
+json_str = {json_repr:?}
 bs = mod.BackendStats.from_json(json_str)
 
 # Print values that Rust test will assert on, one per line.
@@ -323,9 +323,11 @@ print(bs.adversarial_injected)
 print(bs.cgroup_freeze_events)
 print(bs.setup_error_events)
 "#,
-        stats_py_repr = format!("{:?}", stats_py.to_str().unwrap()),
-        python_dir_repr = format!("{:?}", python_dir.to_str().unwrap()),
-        json_repr = format!("{:?}", json_str),
+        // `{…:?}` on a &str/String emits a quoted, escaped literal — used here
+        // deliberately so each value lands in the script as a Python literal.
+        stats_py_repr = stats_py.to_str().unwrap(),
+        python_dir_repr = python_dir.to_str().unwrap(),
+        json_repr = json_str,
     );
 
     let output = Command::new("python3")
@@ -372,7 +374,7 @@ print(bs.setup_error_events)
             )
         })
     };
-    let expected_ttcs = vec![0.11f64, 0.22, 0.33];
+    let expected_ttcs = [0.11f64, 0.22, 0.33];
     for (i, (got, exp)) in py_ttcs.iter().zip(expected_ttcs.iter()).enumerate() {
         assert!(
             (got - exp).abs() < 1e-9,

@@ -26,11 +26,12 @@ def _is_training_config(path: str) -> bool:
             data = yaml.safe_load(f) or {}
         return "algorithm" in data
     elif path.endswith(".toml"):
-        import tomllib
+        # Via config._load_toml, which falls back to the tomli backport: tomllib
+        # is stdlib only from 3.11 and rlox supports 3.10, so a bare
+        # `import tomllib` here made `rlox train --config x.toml` crash there.
+        from rlox.config import _load_toml
 
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
-        return "algorithm" in data
+        return "algorithm" in _load_toml(path)
     return False
 
 

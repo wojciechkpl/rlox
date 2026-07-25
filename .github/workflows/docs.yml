@@ -5,6 +5,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  # Same reason as ci.yml: neutralise .cargo/config.toml's target-cpu=native so a
+  # cached proc-macro dylib built on a different runner cannot SIGILL. Must be
+  # CARGO_ENCODED_RUSTFLAGS — an empty CARGO_BUILD_RUSTFLAGS is silently ignored.
+  CARGO_ENCODED_RUSTFLAGS: ""
+
 permissions:
   contents: read
   pages: write
@@ -77,6 +83,11 @@ jobs:
 
   deploy:
     needs: build
+    # The github-pages environment only permits deploys from the default branch,
+    # so a workflow_dispatch on a feature branch would otherwise fail the run
+    # with "Branch ... is not allowed to deploy to github-pages". Skip instead:
+    # dispatching from a branch still exercises `build` as a docs smoke test.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
