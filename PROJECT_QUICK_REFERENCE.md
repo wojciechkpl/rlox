@@ -28,9 +28,11 @@ DQN, A2C, TRPO).
 | Install (editable, rebuild Rust) | `maturin develop --release` |
 | Run unit tests | `./.venv/bin/python -m pytest tests/python/ -q` |
 | Run slow / integration tests | `./.venv/bin/python -m pytest -m slow` |
-| Run Rust tests | `cargo test --workspace` |
+| **Verify everything CI checks** | `bash scripts/check-ci-local.sh` (`rust` / `python` to scope, `WK=1` to add the Linux sandbox suite) |
+| Run Rust tests | `cargo test --workspace --no-fail-fast` |
 | Python lint | `ruff check python/ tests/` |
-| Rust lint | `cargo clippy --workspace -- -D warnings` |
+| Rust lint (host) | `cargo clippy --workspace --exclude rlox-sandbox --all-targets -- -D warnings` |
+| Rust lint (Linux-only crate) | `cargo clippy -p rlox-sandbox --all-targets --target x86_64-unknown-linux-gnu -- -D warnings` |
 | Format | `ruff format python/ tests/ && cargo fmt --all` |
 | Run a single benchmark cell | `./.venv/bin/python benchmarks/multi_seed_runner.py --algo ppo --env Hopper-v4 --timesteps 100000 --seeds 1` |
 | Multi-seed convergence (local) | `cd ../rlox-priv && bash scripts/run-multi-seed.sh --local` |
@@ -38,7 +40,21 @@ DQN, A2C, TRPO).
 | Aggregate historic results | `./.venv/bin/python scripts/inspect_results.py` |
 
 Python interpreter: always invoke via `./.venv/bin/python`, never bare
-`python3` (the venv has the editable `rlox` install and MuJoCo).
+`python3` (the venv has the editable `rlox` install and MuJoCo). Bare `python3`
+is also 3.14 on this machine, which pyo3 0.23 does not support — it hard-fails
+the `pyo3-ffi` build script and takes the whole workspace lint down with it.
+
+Two traps worth knowing before trusting a local green run:
+
+- `cargo clippy --workspace` **does not compile on macOS** — `rlox-sandbox` is
+  Linux-only (namespaces, seccomp, cgroup v2) and its `seccompiler` dep fails
+  against macOS libc. Lints inside `#[cfg(target_os = "linux")]` are invisible
+  unless you lint against a Linux target (see the table above).
+- `cargo test` stops at the first failing test *binary*, so one failure hides
+  every later binary's. Always `--no-fail-fast`.
+
+`scripts/check-ci-local.sh` handles both, plus toolchain pinning
+(`rust-toolchain.toml`) so local clippy matches CI's lint set exactly.
 
 ---
 

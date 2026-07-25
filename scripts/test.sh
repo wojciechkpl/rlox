@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# rlox — test & benchmark runner
+# rlox — inner-loop test & benchmark runner
 # Usage:
-#   ./scripts/test.sh          Run all tests (Rust + Python)
+#   ./scripts/test.sh          Run rlox-core tests + rebuild the extension + pytest
 #   ./scripts/test.sh --bench  Run tests + benchmarks, update README results
+#
+# This is the fast inner loop, NOT a CI-parity check: it covers rlox-core only
+# (not the other crates), runs tests/python/ only (not tests/agentic/), and does
+# no linting. Before pushing, run the real gate set:
+#
+#   bash scripts/check-ci-local.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
