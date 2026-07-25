@@ -105,6 +105,29 @@ if [ "$SCOPE" = all ] || [ "$SCOPE" = python ]; then
 
   run_gate "pytest (not slow)" \
     "$PY" -m pytest tests/ -q --tb=short -m "not slow" --timeout=120 --timeout-method=thread
+
+  # CI runs a 3.10-3.13 matrix; the venv is one version, so version-gated code
+  # (e.g. a 3.11+ stdlib import without its 3.10 backport) fails only on CI.
+  # tests/agentic/ is the stdlib-only subset where such imports live, so it runs
+  # on 3.10 in a throwaway uv venv without needing torch or the built extension.
+  # tests/test_repo_hygiene.py additionally catches this statically on any version.
+  if command -v uv >/dev/null 2>&1; then
+    PY310_VENV="${TMPDIR:-/tmp}/rlox-check-venv310"
+    # --allow-existing so the venv is cached across runs (provisioning is ~1 s
+    # cold, near-free warm). Provisioning errors are reported, not swallowed: a
+    # gate that quietly disappears is the failure mode this script exists to stop.
+    if provision=$(uv venv --python 3.10 --allow-existing "$PY310_VENV" 2>&1 &&
+         VIRTUAL_ENV="$PY310_VENV" uv pip install -q \
+           pytest pytest-timeout pyyaml tomli tomli-w numpy 2>&1); then
+      run_gate "pytest tests/agentic on Python 3.10 (oldest supported)" \
+        "$PY310_VENV/bin/python" -m pytest tests/agentic/ -q --tb=short -m "not slow"
+    else
+      printf '\n\033[0;31m==> FAIL: could not provision the 3.10 venv:\033[0m\n%s\n' "$provision"
+      FAILED+=("3.10 gate — venv provisioning failed")
+    fi
+  else
+    printf '\n\033[1;33m==> SKIPPED 3.10 gate: uv not found; install uv, or rely on CI'"'"'s 3.10-3.13 matrix.\033[0m\n'
+  fi
 fi
 
 # --- Linux sandbox suite (opt-in) ------------------------------------------

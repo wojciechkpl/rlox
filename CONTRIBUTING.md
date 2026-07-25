@@ -111,6 +111,27 @@ The toolchain is pinned in `rust-toolchain.toml` so local clippy enforces exactl
 the lint set CI does. Clippy adds lints every release; an unpinned `stable` meant
 CI could fail on lints an older local toolchain never reported.
 
+### Python version matrix
+
+`requires-python` is `>=3.10` and CI runs a 3.10–3.13 matrix, but your venv is a
+single version — so version-gated code fails only on CI. The classic case is a
+3.11+ stdlib module imported without its 3.10 backport:
+
+```python
+try:
+    import tomllib          # stdlib from 3.11
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
+```
+
+`rlox.config._load_toml` implements this; reuse it where you can import from
+`rlox`. Two guards cover the gap: `tests/test_repo_hygiene.py` catches unguarded
+version-gated imports statically (any interpreter), and
+`scripts/check-ci-local.sh` runs `tests/agentic/` on 3.10 in a throwaway `uv`
+venv. Both exist because this bug shipped in the `rlox train --config x.toml` CLI
+path and in the prime-rl launcher, where a broad `except Exception` turned the
+`ModuleNotFoundError` into a silent "reward 0.0".
+
 ## Project Structure
 
 ```

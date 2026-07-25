@@ -226,7 +226,23 @@ def _render_run_toml(
 
     All unrelated base keys are preserved.
     """
-    import tomllib
+    # tomllib is stdlib only from 3.11; rlox supports 3.10, so fall back to the
+    # tomli backport (shipped in the dev extra). A bare `import tomllib` here
+    # raised ModuleNotFoundError on 3.10 — and the caller's broad `except
+    # Exception` turned that into a silent "run failed, reward 0.0", so the whole
+    # prime-rl launcher was dead on 3.10 without ever saying why.
+    # This module is stdlib-only by contract (see the header), so it cannot reuse
+    # rlox.config._load_toml — that would pull in torch.
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ModuleNotFoundError:
+            raise ImportError(
+                "TOML support requires Python 3.11+ or the 'tomli' package: "
+                "pip install tomli"
+            )
     import tomli_w
 
     with open(base_toml, "rb") as fh:

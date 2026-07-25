@@ -25,6 +25,7 @@ fails with ImportError/ModuleNotFoundError that is itself a test finding.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -66,12 +67,24 @@ class TestModuleImportNoBadSideEffects:
             print("torch" in sys.modules)
             """
         )
-        benchmarks_agentic = Path(__file__).resolve().parents[2] / "benchmarks" / "agentic"
+        repo_root = Path(__file__).resolve().parents[2]
+        benchmarks_agentic = repo_root / "benchmarks" / "agentic"
+        # The subprocess gets a clean sys.path, so reproduce what conftest.py does
+        # in-process: benchmarks/agentic/ for trl_grpo_run, python/ for rlox_agent.
+        # Without python/ this only passed where rlox_agent happened to be
+        # installed, making the test depend on the environment rather than on the
+        # module under test.
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(benchmarks_agentic), str(repo_root / "python")]
+            + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+        )
         result = subprocess.run(
             [sys.executable, "-c", probe],
             capture_output=True,
             text=True,
             cwd=benchmarks_agentic,
+            env=env,
             timeout=120,
         )
         assert result.returncode == 0, (

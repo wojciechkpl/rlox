@@ -39,6 +39,61 @@ def _iter_py_files() -> list[Path]:
     return out
 
 
+class TestVersionGatedStdlibImports:
+    """`import tomllib` must always carry a `tomli` fallback.
+
+    tomllib entered the stdlib in 3.11, but `requires-python` is >=3.10. An
+    unguarded import therefore breaks only the oldest supported version, which no
+    single-interpreter local run can catch.
+
+    Regression: `benchmarks/agentic/run_benchmark.py` imported it bare inside
+    `_render_toml`, and the caller's broad `except Exception` turned the
+    ModuleNotFoundError into a silent "run failed, reward 0.0" — 58 tests failed
+    on 3.10 with confusing numeric assertions and no mention of the real cause.
+    `python/rlox/__main__.py` had the same bug, crashing
+    `rlox train --config x.toml` on 3.10. Use the `try/except ModuleNotFoundError`
+    pattern in `rlox.config._load_toml`.
+
+    This is a static check, so it holds regardless of which interpreter runs it.
+    """
+
+    # 3.11+ stdlib modules that need a backport fallback on 3.10.
+    VERSION_GATED = {"tomllib"}
+
+    def test_no_unguarded_version_gated_import(self) -> None:
+        offenders = []
+        for path in _iter_py_files():
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+            # Collect every Import node that sits inside a Try block, at any depth.
+            guarded: set[int] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Try):
+                    for sub in ast.walk(node):
+                        if isinstance(sub, (ast.Import, ast.ImportFrom)):
+                            guarded.add(id(sub))
+
+            for node in ast.walk(tree):
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    names = [node.module]
+                hit = self.VERSION_GATED.intersection(names)
+                if hit and id(node) not in guarded:
+                    offenders.append(
+                        f"{path.relative_to(REPO_ROOT)}:{node.lineno} ({', '.join(sorted(hit))})"
+                    )
+
+        assert not offenders, (
+            "Unguarded import of a 3.11+ stdlib module, but rlox supports 3.10 — "
+            "this breaks only the oldest supported version, so no single-interpreter "
+            "run catches it. Wrap in try/except ModuleNotFoundError with the "
+            "backport (see rlox.config._load_toml), or reuse that helper. "
+            f"Offenders: {offenders}"
+        )
+
+
 def _defines_pytest_fixtures_or_hooks(path: Path) -> bool:
     """True if the module looks like a genuine pytest conftest."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
