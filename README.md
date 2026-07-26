@@ -48,6 +48,11 @@ The result: **3-50x faster** than SB3/TorchRL on data-plane operations, with the
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   ```
 - **Optional**: `uv pip install "gymnasium[mujoco]"` for MuJoCo environments
+- **Platforms**: wheels are published for Linux, macOS (Intel + Apple silicon) and
+  Windows. One exception — the `rlox-sandbox` crate is **Linux-only**: it is built
+  on Linux namespaces, seccomp-BPF and cgroup v2, and does not compile elsewhere.
+  Everything else (all 22 algorithms, the Rust data plane, LLM post-training) runs
+  on all three.
 - **Optional**: `uv pip install pettingzoo` for multi-agent environments
 
 ### Installation
@@ -137,6 +142,9 @@ result = env.step_all(actions)
 | Rust API | [cargo doc](https://wojciechkpl.github.io/rlox/rust/rlox_core/) |
 | Migrating from SB3 | [Migration Guide](https://wojciechkpl.github.io/rlox/python/tutorials/migration-sb3/) |
 | API Reference | [Autodoc](https://wojciechkpl.github.io/rlox/python/api/) |
+| Contributing | [Guide](https://wojciechkpl.github.io/rlox/python/contributing/) · [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Changelog | [Release history](https://wojciechkpl.github.io/rlox/python/changelog/) · [CHANGELOG.md](CHANGELOG.md) |
+| Security | [Reporting a vulnerability](SECURITY.md) |
 
 ## Architecture
 
@@ -253,7 +261,7 @@ SAC HalfCheetah: rlox 10872 vs SB3 10796 — statistically identical, both beat 
 - **Production**: callbacks, checkpointing, eval toolkit (IQM, bootstrap CI, performance profiles)
 - **NN backends**: Burn (NdArray) and Candle (CPU) for pure-Rust inference, PyTorch for training
 - **Agentic-RL sandbox benchmark**: Hard-isolated sandbox (`rlox-sandbox`) for executing untrusted agent code with zero contagion. Validated on GRPO post-training: 30-step sweep shows Treatment (sandbox) survives 3/3 runs vs Baseline 1/3 at 10% adversarial injection, with quality-parity guardrail (reward 0.917 = 0.917). Includes reward-integrity protocol, seccomp+cgroup+namespace containment, and adversarial corpus regression tests.
-- **~670 Rust tests, ~1100+ Python tests** — comprehensive coverage across core, sandbox, and the agentic harness
+- **675 Rust tests, 2233 Python tests** — comprehensive coverage across core, sandbox, and the agentic harness
 
 ## Tutorials & Documentation
 

@@ -337,5 +337,5 @@ VLLM_URL=http://remote-host:8000 python benchmarks/agentic/trl_grpo_run.py ...
 ## See Also
 
 - [Agentic-RL Benchmark README](https://github.com/wojciechkpl/rlox/tree/main/benchmarks/agentic/README.md) — full technical design
-- [rlox-sandbox crate README](../../crates/rlox-sandbox/README.md) — isolation guarantees, seccomp/cgroup/namespace details
+- [rlox-sandbox](../architecture/sandbox.md) — isolation guarantees, seccomp/cgroup/namespace details, and the two test capability gates
 - [rlox-rl-ops README](../../crates/rlox-rl-ops/README.md) — GRPO advantage computation

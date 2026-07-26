@@ -5,6 +5,29 @@ repo_url: https://github.com/wojciechkpl/rlox
 repo_name: wojciechkpl/rlox
 docs_dir: docs
 
+# mkdocs builds every .md under docs_dir, nav or not — so internal planning
+# documents were being served publicly and indexed (verified: they returned HTTP
+# 200 on the live site). These stay in the repo; they just stop being published.
+#
+# Listed explicitly rather than by a `*-plan.md` glob: hybrid-collection-plan.md
+# and rust-optimization-plan.md ARE in the nav, and a glob would silently drop
+# them from the site.
+exclude_docs: |
+  plans/
+  rlox_PRD/
+  benchmark/v6-results-summary.md
+  algorithm_gap_analysis.md
+  benchmark-improvement-plan.md
+  docs-overhaul-plan.md
+  documentation-improvement-plan.md
+  extensible-trainer-plan.md
+  github-pages-improvement-plan.md
+  implementation-plan.md
+  offline-rl-implementation-plan.md
+  polars_for_rl_features.md
+  rlox_PRD_old_feature_spec.md
+  trl-gap-analysis-plan.md
+
 theme:
   name: material
   custom_dir: docs/overrides
@@ -170,6 +193,9 @@ nav:
     - Methodology: benchmark/setup.md
   - Architecture:
     - Rust Guide: rust-guide.md
+    # Symlink to crates/rlox-sandbox/README.md so the crate's own docs are the
+    # single source of truth — no copy to drift out of date.
+    - Sandbox (rlox-sandbox): architecture/sandbox.md
     - Profiling Report: profiling-report.md
     - Hybrid Collection Plan: hybrid-collection-plan.md
     - Rust Optimization Plan: rust-optimization-plan.md
@@ -196,3 +222,9 @@ nav:
     - Decision Transformer: research/09-decision-transformer.md
     - MAPPO: research/10-mappo.md
   - References: references.md
+  - Project:
+    # Symlinks to the repo-root files, so the site and the repo cannot disagree.
+    - Contributing: contributing.md
+    - Translating the docs: CONTRIBUTING-translations.md
+    - Changelog: changelog.md
+    - Security Policy: security.md
