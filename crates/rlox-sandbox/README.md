@@ -2,7 +2,7 @@
 
 Hard-isolation sandbox for executing untrusted, model-generated code with zero contagion.
 
-**Purpose:** Execute arbitrary Python code (from LLM agents) in a fully isolated Linux environment with strong guarantees against resource exhaustion and privilege escalation. This is the Treatment-side execution layer for the rlox agentic-benchmark MVP (see [`.wf/design.md` Component 1](./../../../.wf/design.md)).
+**Purpose:** Execute arbitrary Python code (from LLM agents) in a fully isolated Linux environment with strong guarantees against resource exhaustion and privilege escalation. This is the Treatment-side execution layer for the rlox agentic-benchmark MVP (see the [Agentic-RL Sandbox Benchmark guide](https://wojciechkpl.github.io/rlox/python/tutorials/agentic-sandbox-benchmark/)).
 
 ## Isolation Guarantees
 
@@ -188,6 +188,7 @@ Dual-licensed under MIT or Apache 2.0 (workspace standard).
 ---
 
 **See also:**
-- [`.wf/design.md` - Full agentic-benchmark MVP design](./../../../.wf/design.md)
+- [Agentic-RL Sandbox Benchmark](https://wojciechkpl.github.io/rlox/python/tutorials/agentic-sandbox-benchmark/) — the P3 containment study and how to run the sweep
+- [`benchmarks/agentic/README.md`](https://github.com/wojciechkpl/rlox/blob/main/benchmarks/agentic/README.md) — the harness, corpus, and reproduction steps
 - `tests/adversarial_containment.rs` — Detailed threat model and containment verification
 - `src/worker.rs` — Async entry point and namespace implementation

@@ -22,11 +22,48 @@ mod tests {
         Default::default()
     }
 
+    /// Serialises these tests and seeds the backend so weight init is reproducible.
+    /// Hold the returned guard for the whole test: `let _g = seeded();`
+    ///
+    /// Why both halves are needed:
+    ///
+    /// *Seeding* — these tests assert that a training step moves the parameters
+    /// by more than 1e-8. `BurnDeterministicPolicy::new` takes no seed (unlike
+    /// `BurnStochasticPolicy`), so with unseeded init an unlucky draw — a
+    /// saturated tanh, a near-zero gradient — makes a step vanish and the test
+    /// fail. That is how `test_td3_multiple_steps_reduce_negative_q` failed CI on
+    /// a docs-only change, and why its sibling had been quarantined with
+    /// `#[ignore]`. Seeded, the measured margins are 0.075–1.46 against
+    /// thresholds of 1e-8/1e-7 — seven orders of magnitude, so they are also
+    /// insensitive to cross-platform float differences.
+    ///
+    /// *The lock* — `Backend::seed` sets **process-global** RNG state, and cargo
+    /// runs a test binary's tests on multiple threads. Seeding alone therefore
+    /// does not make init deterministic: concurrent tests consume each other's
+    /// RNG. Measured: 2 failures in 25 runs with seeding but no lock, 0 in 15
+    /// with `--test-threads=1`. The mutex gives that serialisation for these
+    /// tests only, without forcing it on the whole workspace or adding a
+    /// `serial_test` dependency.
+    fn seeded() -> std::sync::MutexGuard<'static, ()> {
+        static BACKEND_RNG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // A panicking test poisons the mutex; recover so one failure does not
+        // cascade into spurious failures in the rest.
+        let guard = BACKEND_RNG.lock().unwrap_or_else(|e| e.into_inner());
+        <TestBackend as Backend>::seed(42);
+        guard
+    }
+
     // ─── TD3 gradient flow ───────────────────────────────────
 
+    // Un-ignored: this was quarantined for the unseeded-init flake that
+    // `seeded()` now fixes at the source. With seed 42 the single-step
+    // parameter change measures 1.46 against a 1e-7 threshold — seven orders of
+    // magnitude of margin, so it is not sensitive to cross-platform float
+    // differences. It guards the autograd-through-trait-boundary regression this
+    // module exists for, so it is worth having back rather than skipped.
     #[test]
-    #[ignore = "flaky on CI — gradient can be near-zero with some random seeds"]
     fn test_td3_actor_step_changes_params() {
+        let _guard = seeded();
         let mut policy =
             BurnDeterministicPolicy::<TestBackend>::new(3, 1, 64, 1.0, 1e-2, device().into());
         let critic = BurnTwinQ::<TestBackend>::new(3, 1, 64, 3e-4, device().into());
@@ -60,6 +97,7 @@ mod tests {
 
     #[test]
     fn test_td3_multiple_steps_reduce_negative_q() {
+        let _guard = seeded();
         let mut policy =
             BurnDeterministicPolicy::<TestBackend>::new(3, 1, 64, 1.0, 1e-2, device().into());
         let critic = BurnTwinQ::<TestBackend>::new(3, 1, 64, 3e-4, device().into());
@@ -91,6 +129,7 @@ mod tests {
 
     #[test]
     fn test_sac_actor_step_changes_params() {
+        let _guard = seeded();
         let mut policy =
             BurnStochasticPolicy::<TestBackend>::new(3, 2, 64, 1e-2, device().into(), 42);
         let critic = BurnTwinQ::<TestBackend>::new(3, 2, 64, 3e-4, device().into());
@@ -122,6 +161,7 @@ mod tests {
 
     #[test]
     fn test_sac_multiple_steps_change_policy() {
+        let _guard = seeded();
         let mut policy =
             BurnStochasticPolicy::<TestBackend>::new(3, 1, 64, 1e-2, device().into(), 42);
         let critic = BurnTwinQ::<TestBackend>::new(3, 1, 64, 3e-4, device().into());
