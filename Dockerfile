@@ -8,7 +8,12 @@
 #   2. python-env     — Python venv, maturin build, PyO3 bindings, pytest
 #   3. experiment-runner (final) — lean runtime image with everything baked in
 
-ARG RUST_VERSION=1.86
+# Must be >= the channel in rust-toolchain.toml; the repo pin is copied into
+# the build stages below so rustup honours it. This was 1.86 while the code
+# had moved on to `is_multiple_of` (stable since 1.87), so `cargo build`
+# failed with E0658 and the documented Docker reproduction could not run.
+# tests/test_repo_hygiene.py keeps the two in step.
+ARG RUST_VERSION=1.97.1
 ARG PYTHON_VERSION=3.12
 
 # ---------------------------------------------------------------------------
@@ -36,23 +41,40 @@ WORKDIR /build
 # ---- Dependency caching ----
 # Copy only manifest files first so cargo fetch is cached independently of
 # source changes.
-COPY Cargo.toml Cargo.lock ./
-COPY crates/rlox-core/Cargo.toml   crates/rlox-core/Cargo.toml
-COPY crates/rlox-nn/Cargo.toml     crates/rlox-nn/Cargo.toml
-COPY crates/rlox-burn/Cargo.toml   crates/rlox-burn/Cargo.toml
-COPY crates/rlox-candle/Cargo.toml crates/rlox-candle/Cargo.toml
-COPY crates/rlox-python/Cargo.toml crates/rlox-python/Cargo.toml
-COPY crates/rlox-bench/Cargo.toml  crates/rlox-bench/Cargo.toml
-COPY crates/rlox-grpc/Cargo.toml   crates/rlox-grpc/Cargo.toml
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+# One line per workspace member. This list drifted once already: rlox-rl-ops and
+# rlox-sandbox joined the workspace but were not added here, so `cargo fetch`
+# died with "failed to read crates/rlox-rl-ops/Cargo.toml" — meaning
+# `docker compose build`, the first command in the paper's reproduction
+# instructions, could not succeed at all.
+#
+# A wildcard (`COPY crates/*/Cargo.toml ...`) does NOT work: Docker flattens
+# wildcard sources, so the manifests would overwrite each other. `COPY --parents`
+# preserves the tree but needs the `-labs` syntax channel, which the artifact
+# path should not depend on. So the list stays, and
+# tests/test_repo_hygiene.py fails if it drifts from [workspace].members again.
+COPY crates/rlox-core/Cargo.toml    crates/rlox-core/Cargo.toml
+COPY crates/rlox-nn/Cargo.toml      crates/rlox-nn/Cargo.toml
+COPY crates/rlox-rl-ops/Cargo.toml  crates/rlox-rl-ops/Cargo.toml
+COPY crates/rlox-burn/Cargo.toml    crates/rlox-burn/Cargo.toml
+COPY crates/rlox-candle/Cargo.toml  crates/rlox-candle/Cargo.toml
+COPY crates/rlox-python/Cargo.toml  crates/rlox-python/Cargo.toml
+COPY crates/rlox-bench/Cargo.toml   crates/rlox-bench/Cargo.toml
+COPY crates/rlox-grpc/Cargo.toml    crates/rlox-grpc/Cargo.toml
+COPY crates/rlox-sandbox/Cargo.toml crates/rlox-sandbox/Cargo.toml
 
 # Stub out every crate's lib.rs / main.rs so cargo fetch + a dummy build
 # resolves the dependency graph without needing real source.
 RUN set -eux; \
-    for crate in rlox-core rlox-nn rlox-burn rlox-candle rlox-python rlox-bench rlox-grpc; do \
+    for crate in rlox-core rlox-nn rlox-rl-ops rlox-burn rlox-candle rlox-python \
+                 rlox-bench rlox-grpc rlox-sandbox; do \
         mkdir -p crates/$crate/src; \
         echo "fn main() {}" > crates/$crate/src/main.rs; \
         echo "" > crates/$crate/src/lib.rs; \
     done; \
+    # rlox-sandbox declares an explicit [[bin]] path — stub it too. \
+    mkdir -p crates/rlox-sandbox/src/bin; \
+    echo "fn main() {}" > crates/rlox-sandbox/src/bin/rlox_verify_server.rs; \
     # rlox-bench declares [[bench]] entries — stub them so cargo fetch works \
     mkdir -p crates/rlox-bench/benches; \
     for b in env_stepping micro_ops nn_backends; do \
@@ -82,11 +104,27 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --release --workspace
 
-# Run Rust tests — build fails here if any test fails.
+# Run Rust tests — this really does fail the build now.
+#
+# It previously did not: `cargo test ... | tee` exits with *tee's* status, so a
+# failing suite was silently swallowed and the image shipped anyway. The build
+# log showed `error: test failed` and still finished with exit 0. Both this
+# Dockerfile and the paper claimed the image "runs correctness tests during
+# build"; only with pipefail is that true.
+#
+# rlox-sandbox is excluded: it is Linux-only isolation machinery (namespaces,
+# seccomp, cgroup v2) that a default-profile container cannot exercise —
+# `test_nested_user_namespace_is_denied` and
+# `test_stdout_flood_does_not_exhaust_parent` fail purely because Docker blocks
+# the capabilities they assert on. It is covered by CI and by
+# scripts/wk-sync-test.sh instead, and no claim in the paper depends on it.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo test --workspace 2>&1 | tee /build/rust-test-output.txt
+    cargo test --workspace --exclude rlox-sandbox --no-fail-fast 2>&1 \
+      | tee /build/rust-test-output.txt
+SHELL ["/bin/sh", "-c"]
 
 # Export the compiled Rust test log and the release artifacts we need to
 # carry forward (mainly for reference; maturin will rebuild from source).
@@ -130,7 +168,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
-    RUST_VERSION=1.86.0
+    RUST_VERSION=1.97.1
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --no-modify-path --default-toolchain ${RUST_VERSION} \
     && rustup component add rustfmt clippy
@@ -146,7 +184,11 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 # Layer A: build system + maturin
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir \
-        "maturin==1.7.4" \
+        # >=1.8 required: pyproject.toml declares PEP 639 `license-files`,
+        # which maturin 1.7.4 cannot parse ("wanted string or table"), so the
+        # wheel build — and with it the documented Docker reproduction —
+        # failed. 1.12.6 is the version this pyproject is verified against.
+        "maturin==1.12.6" \
         "pip==24.3.1" \
         "setuptools==75.6.0" \
         "wheel==0.45.1"
@@ -193,7 +235,7 @@ WORKDIR /build/rlox
 # Copy only the files maturin needs for its build phase before copying all
 # source, so the expensive Rust recompile is cached when only Python files
 # change.
-COPY Cargo.toml Cargo.lock pyproject.toml README.md ./
+COPY Cargo.toml Cargo.lock rust-toolchain.toml pyproject.toml README.md ./
 COPY crates/ crates/
 COPY python/ python/
 # benchmarks/ is needed here so it can be forwarded to the final stage via

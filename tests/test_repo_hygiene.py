@@ -237,6 +237,71 @@ class TestRustflagsOverrideIsEffective:
         )
 
 
+class TestDockerfileCoversEveryWorkspaceCrate:
+    """The Dockerfile must copy a manifest for every workspace member.
+
+    For dependency-layer caching the Dockerfile copies each crate's `Cargo.toml`
+    before the sources, as a hand-maintained list. That list drifted: `rlox-rl-ops`
+    and `rlox-sandbox` joined the workspace without being added, so `cargo fetch`
+    failed with `failed to read crates/rlox-rl-ops/Cargo.toml` and
+    `docker compose build` — the first command in the paper's reproduction
+    instructions, and the first thing an artifact reviewer runs — could not
+    succeed.
+
+    A wildcard COPY cannot replace the list (Docker flattens wildcard sources),
+    so the list stays and this test guards it.
+    """
+
+    def test_every_member_manifest_is_copied(self) -> None:
+        with (REPO_ROOT / "Cargo.toml").open("rb") as fh:
+            members = _toml_load(fh)["workspace"]["members"]
+
+        dockerfile = (REPO_ROOT / "Dockerfile").read_text()
+        copied = set(re.findall(r"COPY\s+(crates/[A-Za-z0-9_-]+)/Cargo\.toml", dockerfile))
+
+        missing = sorted(m for m in members if m not in copied)
+        assert not missing, (
+            "Dockerfile does not copy a Cargo.toml for every workspace member, so "
+            "`cargo fetch` will fail during `docker compose build` and the "
+            f"documented reproduction path breaks. Missing: {missing}. Add a "
+            "`COPY crates/<name>/Cargo.toml crates/<name>/Cargo.toml` line for each."
+        )
+
+
+class TestDockerfileRustVersionMatchesToolchain:
+    """The Dockerfile's Rust must not fall behind `rust-toolchain.toml`.
+
+    Regression: the Dockerfile pinned 1.86 while the code had adopted
+    `is_multiple_of` (stable since 1.87), so `cargo build --release --workspace`
+    failed inside the image with `E0658: use of unstable library feature`. Both
+    this and the missing-crate bug meant the paper's documented reproduction
+    could not run at all — and neither was visible from CI, which builds on the
+    runner's toolchain and never exercises the Dockerfile.
+    """
+
+    def test_versions_agree(self) -> None:
+        toolchain = REPO_ROOT / "rust-toolchain.toml"
+        if not toolchain.exists():
+            pytest.skip("no rust-toolchain.toml")
+        with toolchain.open("rb") as fh:
+            pinned = _toml_load(fh)["toolchain"]["channel"]
+
+        dockerfile = (REPO_ROOT / "Dockerfile").read_text()
+        found = set(re.findall(r"RUST_VERSION[= ]([0-9]+\.[0-9]+(?:\.[0-9]+)?)", dockerfile))
+        assert found, "Dockerfile declares no RUST_VERSION"
+
+        def parts(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in v.split("."))
+
+        stale = sorted(v for v in found if parts(v)[:2] < parts(pinned)[:2])
+        assert not stale, (
+            f"Dockerfile pins Rust {stale} but rust-toolchain.toml requires "
+            f"{pinned}. The image will fail to compile code using features "
+            f"stabilised after {stale}. Bump ARG RUST_VERSION and the python-env "
+            f"stage's ENV RUST_VERSION to {pinned}."
+        )
+
+
 class TestCiReferencedExtrasExist:
     """CI installs `-e ".[all]"`; pip only *warns* on an unknown extra, so a
     missing one silently installs nothing and surfaces later as a confusing
