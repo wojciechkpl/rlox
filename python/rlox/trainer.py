@@ -45,6 +45,43 @@ def _accepts_param(cls: type, param: str) -> bool:
         return False
 
 
+def _to_env_action(action: Any, action_space: Any) -> Any:
+    """Coerce a policy action into the form a Gymnasium env accepts.
+
+    Algorithms return actions in whatever type suits their internals — PPO
+    yields a ``torch.Tensor`` of shape ``(1, act_dim)``, others return ints or
+    arrays — but a Gymnasium space is strict about both type and shape. Passing
+    the raw policy output through fails in two different ways:
+
+    * ``Discrete``: the space rejects anything that is not an integer, so
+      CartPole raises ``AssertionError: tensor([1]) invalid``.
+    * ``Box``: a ``(1, 1)`` action is *accepted* but silently broadcasts inside
+      the env — Pendulum then returns an observation of shape ``(3, 1)`` instead
+      of ``(3,)``, and the next ``predict()`` dies with a matmul shape error.
+
+    The second is the nastier of the two: no error at the boundary, just
+    corrupted state one step later. Normalising here keeps the conversion in one
+    place rather than requiring all 22 algorithms to agree on a return type.
+    """
+    import numpy as np
+
+    if hasattr(action, "detach"):  # torch.Tensor
+        action = action.detach().cpu().numpy()
+    arr = np.asarray(action)
+
+    # Discrete / MultiBinary / MultiDiscrete all want integers.
+    if hasattr(action_space, "n"):  # Discrete
+        return int(arr.reshape(-1)[0])
+
+    shape = getattr(action_space, "shape", None)
+    if shape is not None:
+        arr = arr.reshape(shape)
+        dtype = getattr(action_space, "dtype", None)
+        if dtype is not None:
+            arr = arr.astype(dtype)
+    return arr
+
+
 def resolve_env_id(env_id: str) -> str:
     """If *env_id* is in ENV_REGISTRY and not in gymnasium, register it.
 
@@ -274,7 +311,9 @@ class Trainer:
                 else:
                     obs_eval = obs
                 action = self.predict(obs_eval, deterministic=True)
-                obs, r, term, trunc, _ = env.step(action)
+                obs, r, term, trunc, _ = env.step(
+                    _to_env_action(action, env.action_space)
+                )
                 ep_reward += float(r)
                 ep_len += 1
                 done = term or trunc

@@ -44,8 +44,9 @@ class RolloutCollector:
     Parameters
     ----------
     env_id : str
-        Gymnasium environment ID. CartPole-v1 uses the native Rust backend;
-        all others use ``GymVecEnv`` (gymnasium SyncVectorEnv).
+        Gymnasium environment ID. Environments in ``_NATIVE_ENV_IDS``
+        (CartPole-v1, Pendulum-v1) use the native Rust backend; all others use
+        ``GymVecEnv`` (gymnasium SyncVectorEnv).
     n_envs : int
         Number of parallel environments.
     seed : int

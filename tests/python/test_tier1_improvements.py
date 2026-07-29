@@ -25,6 +25,87 @@ import torch
 # ===========================================================================
 
 
+class TestEvaluateOnRealEnvironments:
+    """`evaluate()` against real Gymnasium envs — no mocking.
+
+    The mocked tests below exercise evaluate()'s bookkeeping, but a MagicMock
+    env accepts any action type, so they cannot catch the thing that actually
+    broke: algorithms return actions in whatever type suits them (PPO yields a
+    `torch.Tensor`), and a real `Discrete` space rejects anything that is not an
+    int. `evaluate()` passed the policy output straight to `env.step()`, so it
+    raised `AssertionError: tensor([0]) invalid` on *every* discrete Gymnasium
+    environment — CartPole-v1 included, which is the first example in the docs.
+
+    These tests use real envs so that failure mode cannot hide again.
+    """
+
+    @pytest.mark.parametrize(
+        "env_id,max_return",
+        [
+            ("CartPole-v1", 500.0),  # Discrete(2)
+            ("Pendulum-v1", 0.0),  # Box(1,) — returns are negative
+        ],
+    )
+    def test_evaluate_runs_and_returns_episode_returns(self, env_id, max_return):
+        from rlox.trainer import Trainer
+
+        trainer = Trainer(
+            "ppo", env=env_id, config={"n_envs": 1, "n_steps": 64}, seed=42
+        )
+        trainer.train(total_timesteps=128)
+
+        result = trainer.evaluate(n_episodes=2, seed=0)
+
+        assert result["n_episodes"] == 2
+        assert result["min_reward"] <= result["mean_reward"] <= result["max_reward"]
+        # An *episode return*, not a rollout reward-sum. The distinction matters:
+        # train()'s "mean_reward" is sum(rewards)/n_envs over a rollout, so it
+        # scales with n_steps and can exceed the environment's episode maximum.
+        assert result["mean_reward"] <= max_return, (
+            f"{env_id}: mean_reward={result['mean_reward']} exceeds the maximum "
+            f"attainable episode return ({max_return}) — this looks like a "
+            f"rollout sum rather than an episode return"
+        )
+        assert result["mean_length"] > 0
+
+    def test_evaluate_is_comparable_to_a_manual_rollout(self):
+        """evaluate()'s mean_reward must match a hand-rolled greedy rollout.
+
+        This pins the semantics the paper's onboarding listing relies on: that
+        `trainer.evaluate(...)["mean_reward"]` means the same thing as SB3's
+        `evaluate_policy(...)` return, so the two are directly comparable.
+        """
+        import gymnasium as gym
+
+        from rlox.trainer import Trainer
+
+        trainer = Trainer(
+            "ppo", env="CartPole-v1", config={"n_envs": 1, "n_steps": 64}, seed=42
+        )
+        trainer.train(total_timesteps=128)
+
+        got = trainer.evaluate(n_episodes=3, seed=0)["mean_reward"]
+
+        env = gym.make("CartPole-v1")
+        returns = []
+        for ep in range(3):
+            obs, _ = env.reset(seed=0 + ep)
+            done, total = False, 0.0
+            while not done:
+                action = trainer.predict(obs, deterministic=True)
+                if isinstance(action, torch.Tensor):
+                    action = action.detach().cpu().numpy()
+                obs, r, term, trunc, _ = env.step(int(np.asarray(action).reshape(-1)[0]))
+                total += float(r)
+                done = term or trunc
+            returns.append(total)
+        env.close()
+
+        assert got == pytest.approx(float(np.mean(returns))), (
+            "evaluate() must report the mean greedy episode return"
+        )
+
+
 def _make_mock_env(n_steps_per_episode: int = 5):
     """Build a mock gymnasium Env that runs for a fixed number of steps.
 
@@ -50,11 +131,12 @@ def _make_mock_env(n_steps_per_episode: int = 5):
 
 
 class TestTrainerEvaluate:
-    """Tests for Trainer.evaluate().
+    """Tests for Trainer.evaluate() bookkeeping, against a mock env.
 
-    All tests mock gymnasium.make so that the CartPole action-type assertion
-    (which rejects torch.Tensor actions) does not interfere with testing the
-    evaluate() logic itself.
+    Mocking keeps these fast and lets them pin exact episode counts and lengths.
+    It does NOT exercise action/observation marshalling: a MagicMock env accepts
+    any action type, which is precisely how a crash on every real discrete env
+    went unnoticed. `TestEvaluateOnRealEnvironments` above covers that; keep both.
     """
 
     def _make_trainer(self):
