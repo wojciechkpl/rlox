@@ -303,6 +303,11 @@ cargo test --package rlox-sandbox   # Linux only
 # Fast inner loop (rlox-core + pytest; not a CI-parity check)
 ./scripts/test.sh
 
+# Paper experiments (correctness vs SB3, timings, convergence, ablation).
+# Separate from tests/ — see experiments/README.md. Not run by CI.
+docker compose run --rm experiments        # correctness + performance
+docker compose run --rm experiments-full   # + convergence + ablation
+
 # Agentic-RL benchmark (single-GPU GRPO on Linux with cgroup v2)
 bash benchmarks/agentic/repro.sh --setup-only
 
@@ -333,6 +338,8 @@ benchmarks/
   convergence/     Multi-seed RL convergence suite (5 seeds per cell, IQM + CI)
   agentic/         GRPO agentic-RL validation benchmark (P3 containment study)
 tests/python/      Python integration & benchmark TDD tests
+experiments/       Paper artifact: correctness vs SB3, timings, convergence,
+                   ablation. Reproduces every number in the paper; not run by CI
 docs/              Guides, tutorials, benchmark methodology
 ```
 

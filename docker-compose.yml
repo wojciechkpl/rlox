@@ -39,7 +39,7 @@ x-rlox-base: &rlox-base
     - ./results:/workspace/results
     # Experiments from rlox-priv: mounted read-only at runtime.
     # Override EXPERIMENTS_DIR env var or this path to point elsewhere.
-    - ${EXPERIMENTS_DIR:-../rlox-priv/experiments}:/workspace/experiments:ro
+    - ${EXPERIMENTS_DIR:-./experiments}:/workspace/experiments:ro
   # Reasonable defaults; override with docker-compose.gpu.yml for GPU nodes.
   deploy:
     resources:
